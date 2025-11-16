@@ -1,4 +1,5 @@
 // Modules
+mod archon;
 mod config;
 mod wow;
 
