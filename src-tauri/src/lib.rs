@@ -2,6 +2,7 @@
 mod archon;
 mod config;
 mod fetcher;
+mod lua_talent;
 mod wow;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
