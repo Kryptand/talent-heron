@@ -1,82 +1,234 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { load, save } from "@tauri-apps/plugin-store";
 
-interface Config {
-  characters: Array<{
-    name: string;
-    class: string;
-    specializations: string[];
-  }>;
+interface DiscoveredCharacter {
+  name: string;
+  realm: string;
+  class: string;
+  accountId: string;
+}
+
+interface SelectedCharacter {
+  name: string;
+  class: string;
+  specializations: string[];
+}
+
+interface Settings {
+  wowPath: string;
+  characters: SelectedCharacter[];
   raidDifficulties: string[];
   raidBosses: string[];
   dungeons: string[];
   clearPreviousBuilds: boolean;
-  outputPath: string;
 }
 
-const configPath = ref<string>("");
-const config = ref<Config | null>(null);
+const wowPath = ref("");
+const discoveredCharacters = ref<DiscoveredCharacter[]>([]);
+const selectedCharacters = ref<SelectedCharacter[]>([]);
+const raidDifficulties = ref<string[]>(["heroic"]);
+const raidBosses = ref<string[]>([]);
+const dungeons = ref<string[]>([]);
+const clearPreviousBuilds = ref(false);
+
+const isScanning = ref(false);
 const isUpdating = ref(false);
 const statusMessage = ref("");
 const errorMessage = ref("");
 
-const hasConfig = computed(() => config.value !== null);
+const allClasses = [
+  "Warrior", "Paladin", "Hunter", "Rogue", "Priest",
+  "DeathKnight", "Shaman", "Mage", "Warlock", "Monk",
+  "Druid", "DemonHunter", "Evoker"
+];
 
-async function selectConfigFile() {
+const classSpecs: Record<string, string[]> = {
+  Warrior: ["arms", "fury", "protection"],
+  Paladin: ["holy", "protection", "retribution"],
+  Hunter: ["beast-mastery", "marksmanship", "survival"],
+  Rogue: ["assassination", "outlaw", "subtlety"],
+  Priest: ["discipline", "holy", "shadow"],
+  DeathKnight: ["blood", "frost", "unholy"],
+  Shaman: ["elemental", "enhancement", "restoration"],
+  Mage: ["arcane", "fire", "frost"],
+  Warlock: ["affliction", "demonology", "destruction"],
+  Monk: ["brewmaster", "mistweaver", "windwalker"],
+  Druid: ["balance", "feral", "guardian", "restoration"],
+  DemonHunter: ["havoc", "vengeance"],
+  Evoker: ["devastation", "preservation", "augmentation"]
+};
+
+const hasValidSettings = computed(() => {
+  return wowPath.value && selectedCharacters.value.length > 0;
+});
+
+onMounted(async () => {
+  await loadSettings();
+  if (wowPath.value) {
+    await scanForCharacters();
+  } else {
+    await findWowPath();
+  }
+});
+
+async function loadSettings() {
   try {
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: "JSON",
-          extensions: ["json"],
-        },
-      ],
-    });
+    const store = await load("settings.json", { autoSave: false });
+    const settings = await store.get<Settings>("settings");
 
-    if (selected && typeof selected === "string") {
-      configPath.value = selected;
-      await loadConfig();
+    if (settings) {
+      wowPath.value = settings.wowPath || "";
+      selectedCharacters.value = settings.characters || [];
+      raidDifficulties.value = settings.raidDifficulties || ["heroic"];
+      raidBosses.value = settings.raidBosses || [];
+      dungeons.value = settings.dungeons || [];
+      clearPreviousBuilds.value = settings.clearPreviousBuilds || false;
     }
   } catch (error) {
-    errorMessage.value = `Failed to select file: ${error}`;
+    console.log("No saved settings found, using defaults");
   }
 }
 
-async function loadConfig() {
+async function saveSettings() {
   try {
+    const store = await load("settings.json", { autoSave: false });
+    const settings: Settings = {
+      wowPath: wowPath.value,
+      characters: selectedCharacters.value,
+      raidDifficulties: raidDifficulties.value,
+      raidBosses: raidBosses.value,
+      dungeons: dungeons.value,
+      clearPreviousBuilds: clearPreviousBuilds.value,
+    };
+
+    await store.set("settings", settings);
+    await store.save();
+    statusMessage.value = "Settings saved";
     errorMessage.value = "";
-    const content = await invoke<string>("read_file", { path: configPath.value });
-    config.value = JSON.parse(content);
-    statusMessage.value = "Configuration loaded successfully";
   } catch (error) {
-    errorMessage.value = `Failed to load config: ${error}`;
-    config.value = null;
+    errorMessage.value = `Failed to save settings: ${error}`;
+  }
+}
+
+async function findWowPath() {
+  try {
+    const path = await invoke<string>("find_wow_path");
+    wowPath.value = path;
+    await scanForCharacters();
+  } catch (error) {
+    errorMessage.value = `Could not find WoW installation automatically. Please set the path manually.`;
+  }
+}
+
+async function scanForCharacters() {
+  if (!wowPath.value) {
+    errorMessage.value = "Please set WoW installation path first";
+    return;
+  }
+
+  try {
+    isScanning.value = true;
+    errorMessage.value = "";
+    const chars = await invoke<DiscoveredCharacter[]>("scan_characters", {
+      wowPath: wowPath.value,
+    });
+    discoveredCharacters.value = chars;
+    statusMessage.value = `Found ${chars.length} character(s)`;
+  } catch (error) {
+    errorMessage.value = `Failed to scan characters: ${error}`;
+    discoveredCharacters.value = [];
+  } finally {
+    isScanning.value = false;
+  }
+}
+
+function addCharacter(char: DiscoveredCharacter) {
+  const existingIndex = selectedCharacters.value.findIndex(
+    (c) => c.name === char.name
+  );
+
+  if (existingIndex >= 0) {
+    statusMessage.value = `${char.name} is already added`;
+    return;
+  }
+
+  const classSpecs = getClassSpecs(char.class);
+
+  selectedCharacters.value.push({
+    name: char.name,
+    class: char.class === "Unknown" ? "Warrior" : char.class,
+    specializations: classSpecs.length > 0 ? [classSpecs[0]] : [],
+  });
+}
+
+function removeCharacter(index: number) {
+  selectedCharacters.value.splice(index, 1);
+}
+
+function getClassSpecs(className: string): string[] {
+  return classSpecs[className] || [];
+}
+
+function toggleSpec(charIndex: number, spec: string) {
+  const char = selectedCharacters.value[charIndex];
+  const specIndex = char.specializations.indexOf(spec);
+
+  if (specIndex >= 0) {
+    char.specializations.splice(specIndex, 1);
+  } else {
+    char.specializations.push(spec);
+  }
+}
+
+function toggleDifficulty(difficulty: string) {
+  const index = raidDifficulties.value.indexOf(difficulty);
+  if (index >= 0) {
+    raidDifficulties.value.splice(index, 1);
+  } else {
+    raidDifficulties.value.push(difficulty);
   }
 }
 
 async function updateTalents() {
-  if (!configPath.value) {
-    errorMessage.value = "Please select a configuration file first";
+  if (!hasValidSettings.value) {
+    errorMessage.value = "Please configure settings before updating";
     return;
   }
+
+  // Build output path
+  const firstChar = selectedCharacters.value[0];
+  const accountId = discoveredCharacters.value.find(
+    (c) => c.name === firstChar.name
+  )?.accountId || "Unknown";
+
+  const outputPath = `${wowPath.value}/WTF/Account/${accountId}/SavedVariables/TalentLoadoutsEx.lua`;
+
+  const config = {
+    characters: selectedCharacters.value,
+    raidDifficulties: raidDifficulties.value,
+    raidBosses: raidBosses.value,
+    dungeons: dungeons.value,
+    clearPreviousBuilds: clearPreviousBuilds.value,
+    outputPath,
+  };
 
   try {
     isUpdating.value = true;
     errorMessage.value = "";
     statusMessage.value = "Fetching talents from Archon.gg...";
 
-    const result = await invoke<string>("update_talents", {
-      configPath: configPath.value,
+    const result = await invoke<string>("update_talents_from_config", {
+      config,
     });
 
     statusMessage.value = result;
-    isUpdating.value = false;
+    await saveSettings();
   } catch (error) {
     errorMessage.value = `Update failed: ${error}`;
     statusMessage.value = "";
+  } finally {
     isUpdating.value = false;
   }
 }
@@ -86,60 +238,135 @@ async function updateTalents() {
   <main class="container">
     <header>
       <h1>🎮 Archon Talent Updater</h1>
-      <p class="subtitle">
-        Automatically fetch and update WoW talent builds from Archon.gg
-      </p>
+      <p class="subtitle">Auto-discover characters and update WoW talents from Archon.gg</p>
     </header>
 
-    <section class="config-section">
-      <h2>Configuration</h2>
-      <div class="file-selector">
-        <button @click="selectConfigFile" class="btn-primary">
-          📁 Select settings.json
+    <!-- WoW Installation -->
+    <section class="settings-section">
+      <h2>📂 WoW Installation</h2>
+      <div class="input-group">
+        <input
+          v-model="wowPath"
+          type="text"
+          placeholder="/Applications/World of Warcraft/_retail_"
+          class="path-input"
+        />
+        <button @click="findWowPath" class="btn-secondary" :disabled="isScanning">
+          🔍 Auto-detect
         </button>
-        <span v-if="configPath" class="file-path">{{ configPath }}</span>
+        <button @click="scanForCharacters" class="btn-secondary" :disabled="isScanning">
+          <span v-if="!isScanning">🔄 Scan</span>
+          <span v-else>⏳ Scanning...</span>
+        </button>
       </div>
+    </section>
 
-      <div v-if="hasConfig" class="config-display">
-        <h3>Loaded Configuration</h3>
-        <div class="config-grid">
-          <div class="config-item">
-            <strong>Characters:</strong>
-            <ul>
-              <li v-for="char in config!.characters" :key="char.name">
-                {{ char.name }} ({{ char.class }}) -
-                {{ char.specializations.join(", ") }}
-              </li>
-            </ul>
+    <!-- Discovered Characters -->
+    <section class="settings-section" v-if="discoveredCharacters.length > 0">
+      <h2>👥 Discovered Characters</h2>
+      <div class="character-grid">
+        <div
+          v-for="char in discoveredCharacters"
+          :key="`${char.name}-${char.realm}`"
+          class="character-card"
+          @click="addCharacter(char)"
+        >
+          <div class="char-name">{{ char.name }}</div>
+          <div class="char-details">{{ char.realm }} • {{ char.class }}</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Selected Characters -->
+    <section class="settings-section" v-if="selectedCharacters.length > 0">
+      <h2>✅ Selected Characters & Specs</h2>
+      <div class="selected-characters">
+        <div v-for="(char, index) in selectedCharacters" :key="index" class="selected-char">
+          <div class="char-header">
+            <span class="char-name-large">{{ char.name }}</span>
+            <select v-model="char.class" class="class-select">
+              <option v-for="className in allClasses" :key="className" :value="className">
+                {{ className }}
+              </option>
+            </select>
+            <button @click="removeCharacter(index)" class="btn-remove">✕</button>
           </div>
-          <div class="config-item">
-            <strong>Raid Difficulties:</strong>
-            <span>{{ config!.raidDifficulties.join(", ") || "None" }}</span>
-          </div>
-          <div class="config-item">
-            <strong>Raid Bosses:</strong>
-            <span>{{ config!.raidBosses.join(", ") || "None" }}</span>
-          </div>
-          <div class="config-item">
-            <strong>Dungeons:</strong>
-            <span>{{ config!.dungeons.join(", ") || "None" }}</span>
-          </div>
-          <div class="config-item">
-            <strong>Output Path:</strong>
-            <span class="path">{{ config!.outputPath }}</span>
-          </div>
-          <div class="config-item">
-            <strong>Clear Previous Builds:</strong>
-            <span>{{ config!.clearPreviousBuilds ? "Yes" : "No" }}</span>
+          <div class="spec-selection">
+            <label
+              v-for="spec in getClassSpecs(char.class)"
+              :key="spec"
+              class="spec-checkbox"
+            >
+              <input
+                type="checkbox"
+                :checked="char.specializations.includes(spec)"
+                @change="toggleSpec(index, spec)"
+              />
+              {{ spec }}
+            </label>
           </div>
         </div>
       </div>
     </section>
 
+    <!-- Raid Settings -->
+    <section class="settings-section">
+      <h2>🏆 Raid Settings</h2>
+      <div class="form-group">
+        <label>Difficulties:</label>
+        <div class="checkbox-group">
+          <label v-for="diff in ['normal', 'heroic', 'mythic']" :key="diff">
+            <input
+              type="checkbox"
+              :checked="raidDifficulties.includes(diff)"
+              @change="toggleDifficulty(diff)"
+            />
+            {{ diff }}
+          </label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Bosses (comma-separated, lowercase-hyphenated):</label>
+        <input
+          v-model="raidBosses"
+          type="text"
+          placeholder="broodtwister, sikran, queen-ansurek"
+          @input="raidBosses = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim())"
+          :value="raidBosses.join(', ')"
+        />
+      </div>
+    </section>
+
+    <!-- M+ Settings -->
+    <section class="settings-section">
+      <h2>⚔️ Mythic+ Settings</h2>
+      <div class="form-group">
+        <label>Dungeons (comma-separated, lowercase-hyphenated):</label>
+        <input
+          v-model="dungeons"
+          type="text"
+          placeholder="ara-kara, city-of-threads, mists-of-tirna-scithe"
+          @input="dungeons = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim())"
+          :value="dungeons.join(', ')"
+        />
+      </div>
+    </section>
+
+    <!-- Other Settings -->
+    <section class="settings-section">
+      <h2>⚙️ Other Settings</h2>
+      <label class="checkbox-label">
+        <input type="checkbox" v-model="clearPreviousBuilds" />
+        Clear all previous auto-generated builds before updating
+      </label>
+    </section>
+
+    <!-- Actions -->
     <section class="action-section">
+      <button @click="saveSettings" class="btn-secondary">💾 Save Settings</button>
       <button
         @click="updateTalents"
-        :disabled="!hasConfig || isUpdating"
+        :disabled="!hasValidSettings || isUpdating"
         class="btn-update"
       >
         <span v-if="!isUpdating">🚀 Update Talents</span>
@@ -147,33 +374,24 @@ async function updateTalents() {
       </button>
     </section>
 
+    <!-- Status -->
     <section v-if="statusMessage || errorMessage" class="status-section">
-      <div v-if="statusMessage" class="status-success">
-        ✓ {{ statusMessage }}
-      </div>
+      <div v-if="statusMessage" class="status-success">✓ {{ statusMessage }}</div>
       <div v-if="errorMessage" class="status-error">✗ {{ errorMessage }}</div>
     </section>
-
-    <footer>
-      <p class="help-text">
-        Need help? Create a
-        <code>settings.json</code> file based on
-        <code>settings.example.json</code>
-      </p>
-    </footer>
   </main>
 </template>
 
 <style scoped>
 .container {
-  max-width: 900px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 2rem;
 }
 
 header {
   text-align: center;
-  margin-bottom: 3rem;
+  margin-bottom: 2rem;
 }
 
 h1 {
@@ -187,116 +405,219 @@ h1 {
   font-size: 1.1rem;
 }
 
-.config-section,
-.action-section,
-.status-section {
-  margin-bottom: 2rem;
+.settings-section {
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
 }
 
 h2 {
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   margin-bottom: 1rem;
   color: #333;
 }
 
-h3 {
-  font-size: 1.2rem;
-  margin-bottom: 0.5rem;
-  color: #555;
-}
-
-.file-selector {
+.input-group {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  gap: 0.5rem;
 }
 
-.file-path {
-  font-size: 0.9rem;
-  color: #666;
+.path-input {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
   font-family: monospace;
-  word-break: break-all;
 }
 
-.btn-primary,
+.btn-secondary,
 .btn-update {
-  padding: 0.8rem 1.5rem;
-  font-size: 1rem;
+  padding: 0.6rem 1.2rem;
+  font-size: 0.95rem;
   font-weight: 600;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.2s;
 }
 
-.btn-primary {
+.btn-secondary {
   background-color: #24c8db;
   color: white;
 }
 
-.btn-primary:hover {
+.btn-secondary:hover:not(:disabled) {
   background-color: #1da1b5;
+}
+
+.btn-secondary:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.character-card {
+  background: white;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.character-card:hover {
+  border-color: #24c8db;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(36, 200, 219, 0.3);
+  box-shadow: 0 4px 12px rgba(36, 200, 219, 0.2);
+}
+
+.char-name {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.char-details {
+  font-size: 0.9rem;
+  color: #666;
+  margin-top: 0.25rem;
+}
+
+.selected-characters {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.selected-char {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.char-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.char-name-large {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.class-select {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.btn-remove {
+  margin-left: auto;
+  padding: 0.4rem 0.8rem;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-remove:hover {
+  background: #d32f2f;
+}
+
+.spec-selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.spec-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.spec-checkbox input {
+  cursor: pointer;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #333;
+}
+
+.form-group input[type="text"] {
+  width: 100%;
+  padding: 0.6rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.checkbox-group {
+  display: flex;
+  gap: 1rem;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.action-section {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 .btn-update {
+  flex: 1;
   background-color: #4caf50;
   color: white;
-  width: 100%;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
 }
 
 .btn-update:hover:not(:disabled) {
   background-color: #45a049;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
 }
 
 .btn-update:disabled {
   background-color: #ccc;
   cursor: not-allowed;
-  transform: none;
-}
-
-.config-display {
-  background: #f9f9f9;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1.5rem;
-}
-
-.config-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.config-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.config-item strong {
-  color: #333;
-}
-
-.config-item ul {
-  margin: 0;
-  padding-left: 1.5rem;
-}
-
-.config-item li {
-  margin: 0.25rem 0;
-}
-
-.config-item .path {
-  font-family: monospace;
-  font-size: 0.9rem;
-  color: #666;
-  word-break: break-all;
 }
 
 .status-section {
@@ -320,61 +641,43 @@ h3 {
   border-left: 4px solid #f44336;
 }
 
-footer {
-  text-align: center;
-  margin-top: 3rem;
-  padding-top: 2rem;
-  border-top: 1px solid #ddd;
-}
-
-.help-text {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-code {
-  background: #f5f5f5;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font-family: monospace;
-}
-
 @media (prefers-color-scheme: dark) {
-  h1 {
-    color: #24c8db;
-  }
-
-  h2,
-  h3 {
-    color: #f6f6f6;
-  }
-
-  .subtitle,
-  .file-path,
-  .help-text {
-    color: #aaa;
-  }
-
-  .config-display {
+  .settings-section {
     background: #1a1a1a;
     border-color: #444;
   }
 
-  .config-item strong {
+  h2 {
     color: #f6f6f6;
   }
 
-  .config-item .path {
+  .path-input,
+  .class-select,
+  .form-group input[type="text"] {
+    background: #2a2a2a;
+    color: #f6f6f6;
+    border-color: #555;
+  }
+
+  .character-card,
+  .selected-char {
+    background: #2a2a2a;
+    border-color: #555;
+  }
+
+  .char-name,
+  .char-name-large,
+  .form-group label {
+    color: #f6f6f6;
+  }
+
+  .char-details {
     color: #aaa;
   }
 
-  code {
+  .spec-checkbox {
     background: #333;
     color: #f6f6f6;
-  }
-
-  footer {
-    border-top-color: #444;
   }
 }
 </style>
