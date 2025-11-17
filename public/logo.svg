@@ -1,0 +1,19 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#a855f7;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#d946ef;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle with gradient -->
+  <circle cx="256" cy="256" r="240" fill="url(#purpleGradient)" opacity="0.2"/>
+
+  <!-- Letter A -->
+  <path d="M 256 120 L 380 420 L 330 420 L 305 360 L 207 360 L 182 420 L 132 420 L 256 120 Z M 256 200 L 225 300 L 287 300 L 256 200 Z"
+        fill="url(#purpleGradient)"
+        stroke="url(#purpleGradient)"
+        stroke-width="8"
+        stroke-linejoin="round"/>
+</svg>

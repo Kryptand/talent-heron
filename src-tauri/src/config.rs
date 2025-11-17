@@ -74,6 +74,7 @@ impl Config {
     }
 
     /// Create a default example configuration
+    #[allow(dead_code)]
     pub fn example() -> Self {
         Config {
             characters: vec![

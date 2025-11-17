@@ -3,6 +3,7 @@ use chrono::Datelike;
 
 /// Content type for Archon.gg builds
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ContentType {
     Raid,
     MythicPlus,

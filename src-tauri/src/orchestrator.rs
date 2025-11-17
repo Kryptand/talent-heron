@@ -1,9 +1,19 @@
 use crate::archon::{ArchonUrlBuilder, MythicPlusTimespan, RaidDifficulty, TalentIdentifier};
-use crate::config::{Character, Config};
+use crate::config::Config;
 use crate::fetcher::ArchonFetcher;
 use crate::lua_talent::{LuaTalentManager, TalentLoadout};
 use crate::wow::WowClass;
 use anyhow::{Context, Result};
+use serde::Serialize;
+
+/// Summary of the talent update operation
+#[derive(Debug, Serialize)]
+pub struct UpdateSummary {
+    pub total_talents_updated: usize,
+    pub raid_talents: usize,
+    pub mythic_plus_talents: usize,
+    pub characters_processed: usize,
+}
 
 /// Orchestrates the entire talent fetch and update process
 pub struct TalentOrchestrator {
@@ -23,8 +33,11 @@ impl TalentOrchestrator {
     }
 
     /// Run the full talent update process
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run(&self) -> Result<UpdateSummary> {
         println!("Starting talent fetch from Archon.gg...");
+
+        let mut raid_talents = 0;
+        let mut mythic_plus_talents = 0;
 
         // Load existing talents
         let mut talent_manager = if self.config.output_path.exists() {
@@ -64,13 +77,13 @@ impl TalentOrchestrator {
 
                 // Fetch raid builds
                 if !self.config.raid_bosses.is_empty() && !self.config.raid_difficulties.is_empty() {
-                    self.fetch_raid_builds(&mut talent_manager, wow_class, spec, spec_index)
+                    raid_talents += self.fetch_raid_builds(&mut talent_manager, wow_class, spec, spec_index)
                         .await?;
                 }
 
                 // Fetch Mythic+ builds
                 if !self.config.dungeons.is_empty() {
-                    self.fetch_mythic_plus_builds(&mut talent_manager, wow_class, spec, spec_index)
+                    mythic_plus_talents += self.fetch_mythic_plus_builds(&mut talent_manager, wow_class, spec, spec_index)
                         .await?;
                 }
             }
@@ -82,8 +95,18 @@ impl TalentOrchestrator {
             .write_to_file(&self.config.output_path)
             .context("Failed to write talents to file")?;
 
+        let summary = UpdateSummary {
+            total_talents_updated: raid_talents + mythic_plus_talents,
+            raid_talents,
+            mythic_plus_talents,
+            characters_processed: self.config.characters.len(),
+        };
+
         println!("Talent fetch complete!");
-        Ok(())
+        println!("Summary: {} total talents updated ({} raid, {} M+)",
+            summary.total_talents_updated, summary.raid_talents, summary.mythic_plus_talents);
+
+        Ok(summary)
     }
 
     /// Fetch raid builds for a specific class/spec
@@ -93,7 +116,9 @@ impl TalentOrchestrator {
         wow_class: WowClass,
         spec: &str,
         spec_index: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
+        let mut count = 0;
+
         for boss in &self.config.raid_bosses {
             for difficulty_str in &self.config.raid_difficulties {
                 let difficulty = RaidDifficulty::from_str(difficulty_str)
@@ -116,16 +141,17 @@ impl TalentOrchestrator {
                             spec_index,
                             talent,
                         );
-                        println!("      ✓ Found talent build");
+                        println!("      Found talent build");
+                        count += 1;
                     }
                     None => {
-                        println!("      ✗ No talent build available");
+                        println!("      No talent build available");
                     }
                 }
             }
         }
 
-        Ok(())
+        Ok(count)
     }
 
     /// Fetch Mythic+ builds for a specific class/spec
@@ -135,7 +161,9 @@ impl TalentOrchestrator {
         wow_class: WowClass,
         spec: &str,
         spec_index: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
+        let mut count = 0;
+
         for dungeon in &self.config.dungeons {
             let identifier = TalentIdentifier::MythicPlus {
                 dungeon: dungeon.clone(),
@@ -149,7 +177,7 @@ impl TalentOrchestrator {
 
             let talent_string = match self.fetcher.fetch_talent_build(&url).await? {
                 Some(talent) => {
-                    println!("      ✓ Found talent build ({})", primary_timespan.as_str());
+                    println!("      Found talent build ({})", primary_timespan.as_str());
                     Some(talent)
                 }
                 None => {
@@ -166,11 +194,11 @@ impl TalentOrchestrator {
 
                     match self.fetcher.fetch_talent_build(&fallback_url).await? {
                         Some(talent) => {
-                            println!("      ✓ Found talent build ({})", fallback_timespan.as_str());
+                            println!("      Found talent build ({})", fallback_timespan.as_str());
                             Some(talent)
                         }
                         None => {
-                            println!("      ✗ No talent build available");
+                            println!("      No talent build available");
                             None
                         }
                     }
@@ -184,9 +212,10 @@ impl TalentOrchestrator {
                     spec_index,
                     talent,
                 );
+                count += 1;
             }
         }
 
-        Ok(())
+        Ok(count)
     }
 }

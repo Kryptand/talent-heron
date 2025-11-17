@@ -4,11 +4,13 @@ mod config;
 mod fetcher;
 mod lua_talent;
 mod orchestrator;
+mod warcraft_logs;
 mod wow;
 mod wow_scanner;
 
 use config::Config;
-use orchestrator::TalentOrchestrator;
+use orchestrator::{TalentOrchestrator, UpdateSummary};
+use warcraft_logs::{DiscoveredContent, WarcraftLogsService};
 use wow_scanner::{DiscoveredCharacter, WowScanner};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -43,15 +45,13 @@ fn scan_characters(wow_path: String) -> Result<Vec<DiscoveredCharacter>, String>
 
 /// Tauri command to update talents from Archon.gg
 #[tauri::command]
-async fn update_talents_from_config(config: Config) -> Result<String, String> {
+async fn update_talents_from_config(config: Config) -> Result<UpdateSummary, String> {
     // Create orchestrator and run
     let orchestrator = TalentOrchestrator::new(config);
     orchestrator
         .run()
         .await
-        .map_err(|e| format!("Failed to update talents: {}", e))?;
-
-    Ok("Talents updated successfully!".to_string())
+        .map_err(|e| format!("Failed to update talents: {}", e))
 }
 
 /// Tauri command to update talents from a config file (kept for backwards compatibility)
@@ -70,6 +70,14 @@ async fn update_talents(config_path: String) -> Result<String, String> {
     Ok("Talents updated successfully!".to_string())
 }
 
+/// Tauri command to auto-discover current raids and dungeons from Warcraft Logs
+#[tauri::command]
+async fn discover_content() -> Result<DiscoveredContent, String> {
+    WarcraftLogsService::discover_current_content()
+        .await
+        .map_err(|e| format!("Failed to discover content: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -82,7 +90,8 @@ pub fn run() {
             find_wow_path,
             scan_characters,
             update_talents_from_config,
-            update_talents
+            update_talents,
+            discover_content
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

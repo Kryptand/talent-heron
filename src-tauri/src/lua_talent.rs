@@ -199,17 +199,20 @@ impl LuaTalentManager {
     }
 
     /// Get all talents for a specific class
+    #[allow(dead_code)]
     pub fn get_class_talents(&self, class_name: &str) -> Option<&ClassTalents> {
         self.talents.get(class_name)
     }
 
     /// Get all talents for a specific class and spec
+    #[allow(dead_code)]
     pub fn get_spec_talents(&self, class_name: &str, spec_index: u8) -> Option<&Vec<TalentLoadout>> {
         self.talents.get(class_name)?.get(&spec_index)
     }
 
     /// Set talents for a specific class and spec
     /// This replaces all talents for that spec
+    #[allow(dead_code)]
     pub fn set_spec_talents(&mut self, class_name: String, spec_index: u8, talents: Vec<TalentLoadout>) {
         self.talents
             .entry(class_name)

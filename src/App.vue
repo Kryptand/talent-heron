@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { load, save } from "@tauri-apps/plugin-store";
+import { load } from "@tauri-apps/plugin-store";
+import TabNavigation from "./components/TabNavigation.vue";
+import ActiveCharactersTab from "./components/ActiveCharactersTab.vue";
+import GameSettingsTab from "./components/GameSettingsTab.vue";
+import ContentSettingsTab from "./components/ContentSettingsTab.vue";
+import StatusMessages from "./components/StatusMessages.vue";
 
 interface DiscoveredCharacter {
   name: string;
@@ -18,11 +23,19 @@ interface SelectedCharacter {
 
 interface Settings {
   wowPath: string;
+  discoveredCharacters: DiscoveredCharacter[];
   characters: SelectedCharacter[];
   raidDifficulties: string[];
   raidBosses: string[];
   dungeons: string[];
   clearPreviousBuilds: boolean;
+}
+
+interface UpdateSummary {
+  total_talents_updated: number;
+  raid_talents: number;
+  mythic_plus_talents: number;
+  characters_processed: number;
 }
 
 const wowPath = ref("");
@@ -35,8 +48,16 @@ const clearPreviousBuilds = ref(false);
 
 const isScanning = ref(false);
 const isUpdating = ref(false);
+const isDiscovering = ref(false);
 const statusMessage = ref("");
 const errorMessage = ref("");
+const updateSummary = ref<UpdateSummary | null>(null);
+
+const activeTab = ref("characters");
+const expandedSections = ref({
+  characters: selectedCharacters.value.length > 0,
+});
+const appInitialized = ref(false);
 
 const allClasses = [
   "Warrior", "Paladin", "Hunter", "Rogue", "Priest",
@@ -60,9 +81,13 @@ const classSpecs: Record<string, string[]> = {
   Evoker: ["devastation", "preservation", "augmentation"]
 };
 
-const hasValidSettings = computed(() => {
-  return wowPath.value && selectedCharacters.value.length > 0;
+const hasValidSettings = computed<boolean>(() => {
+  return !!(wowPath.value && selectedCharacters.value.length > 0);
 });
+
+function toggleLibrary() {
+  expandedSections.value.characters = !expandedSections.value.characters;
+}
 
 onMounted(async () => {
   await loadSettings();
@@ -71,15 +96,18 @@ onMounted(async () => {
   } else {
     await findWowPath();
   }
+
+  appInitialized.value = true;
 });
 
 async function loadSettings() {
   try {
-    const store = await load("settings.json", { autoSave: false });
+    const store = await load("settings.json", { autoSave: false, defaults: {} });
     const settings = await store.get<Settings>("settings");
 
     if (settings) {
       wowPath.value = settings.wowPath || "";
+      discoveredCharacters.value = settings.discoveredCharacters || [];
       selectedCharacters.value = settings.characters || [];
       raidDifficulties.value = settings.raidDifficulties || ["heroic"];
       raidBosses.value = settings.raidBosses || [];
@@ -91,11 +119,12 @@ async function loadSettings() {
   }
 }
 
-async function saveSettings() {
+async function saveSettings(showMessage: boolean = true) {
   try {
-    const store = await load("settings.json", { autoSave: false });
+    const store = await load("settings.json", { autoSave: false, defaults: {} });
     const settings: Settings = {
       wowPath: wowPath.value,
+      discoveredCharacters: discoveredCharacters.value,
       characters: selectedCharacters.value,
       raidDifficulties: raidDifficulties.value,
       raidBosses: raidBosses.value,
@@ -105,8 +134,10 @@ async function saveSettings() {
 
     await store.set("settings", settings);
     await store.save();
-    statusMessage.value = "Settings saved";
-    errorMessage.value = "";
+    if (showMessage) {
+      statusMessage.value = "Settings saved";
+      errorMessage.value = "";
+    }
   } catch (error) {
     errorMessage.value = `Failed to save settings: ${error}`;
   }
@@ -134,11 +165,25 @@ async function scanForCharacters() {
     const chars = await invoke<DiscoveredCharacter[]>("scan_characters", {
       wowPath: wowPath.value,
     });
-    discoveredCharacters.value = chars;
-    statusMessage.value = `Found ${chars.length} character(s)`;
+
+    // Merge with existing characters (avoid duplicates)
+    const existingKeys = new Set(
+      discoveredCharacters.value.map(c => `${c.name}-${c.realm}-${c.accountId}`)
+    );
+
+    const newChars = chars.filter(
+      c => !existingKeys.has(`${c.name}-${c.realm}-${c.accountId}`)
+    );
+
+    discoveredCharacters.value = [...discoveredCharacters.value, ...newChars];
+
+    if(appInitialized.value){
+      statusMessage.value = `Found ${chars.length} character(s) (${newChars.length} new)`;
+    }
+
+    await saveSettings(false);
   } catch (error) {
     errorMessage.value = `Failed to scan characters: ${error}`;
-    discoveredCharacters.value = [];
   } finally {
     isScanning.value = false;
   }
@@ -161,6 +206,9 @@ function addCharacter(char: DiscoveredCharacter) {
     class: char.class === "Unknown" ? "Warrior" : char.class,
     specializations: classSpecs.length > 0 ? [classSpecs[0]] : [],
   });
+
+  // Collapse the character library after adding a character
+  expandedSections.value.characters = false;
 }
 
 function removeCharacter(index: number) {
@@ -191,6 +239,27 @@ function toggleDifficulty(difficulty: string) {
   }
 }
 
+async function discoverContent() {
+  try {
+    isDiscovering.value = true;
+    errorMessage.value = "";
+    statusMessage.value = "Discovering raids and dungeons from Warcraft Logs...";
+
+    const content = await invoke<{ raid_bosses: string[], dungeons: string[] }>("discover_content");
+
+    raidBosses.value = content.raid_bosses;
+    dungeons.value = content.dungeons;
+
+    statusMessage.value = `Discovered ${content.raid_bosses.length} raid bosses and ${content.dungeons.length} dungeons`;
+    await saveSettings(false);
+  } catch (error) {
+    errorMessage.value = `Failed to discover content: ${error}`;
+    statusMessage.value = "";
+  } finally {
+    isDiscovering.value = false;
+  }
+}
+
 async function updateTalents() {
   if (!hasValidSettings.value) {
     errorMessage.value = "Please configure settings before updating";
@@ -217,17 +286,20 @@ async function updateTalents() {
   try {
     isUpdating.value = true;
     errorMessage.value = "";
+    updateSummary.value = null;
     statusMessage.value = "Fetching talents from Archon.gg...";
 
-    const result = await invoke<string>("update_talents_from_config", {
+    const result = await invoke<UpdateSummary>("update_talents_from_config", {
       config,
     });
 
-    statusMessage.value = result;
-    await saveSettings();
+    updateSummary.value = result;
+    statusMessage.value = `Successfully updated ${result.total_talents_updated} talents (${result.raid_talents} raid, ${result.mythic_plus_talents} M+) for ${result.characters_processed} character(s)`;
+    await saveSettings(false);
   } catch (error) {
     errorMessage.value = `Update failed: ${error}`;
     statusMessage.value = "";
+    updateSummary.value = null;
   } finally {
     isUpdating.value = false;
   }
@@ -235,449 +307,68 @@ async function updateTalents() {
 </script>
 
 <template>
-  <main class="container">
-    <header>
-      <h1>🎮 Archon Talent Updater</h1>
-      <p class="subtitle">Auto-discover characters and update WoW talents from Archon.gg</p>
-    </header>
-
-    <!-- WoW Installation -->
-    <section class="settings-section">
-      <h2>📂 WoW Installation</h2>
-      <div class="input-group">
-        <input
-          v-model="wowPath"
-          type="text"
-          placeholder="/Applications/World of Warcraft/_retail_"
-          class="path-input"
-        />
-        <button @click="findWowPath" class="btn-secondary" :disabled="isScanning">
-          🔍 Auto-detect
-        </button>
-        <button @click="scanForCharacters" class="btn-secondary" :disabled="isScanning">
-          <span v-if="!isScanning">🔄 Scan</span>
-          <span v-else>⏳ Scanning...</span>
-        </button>
-      </div>
-    </section>
-
-    <!-- Discovered Characters -->
-    <section class="settings-section" v-if="discoveredCharacters.length > 0">
-      <h2>👥 Discovered Characters</h2>
-      <div class="character-grid">
-        <div
-          v-for="char in discoveredCharacters"
-          :key="`${char.name}-${char.realm}`"
-          class="character-card"
-          @click="addCharacter(char)"
-        >
-          <div class="char-name">{{ char.name }}</div>
-          <div class="char-details">{{ char.realm }} • {{ char.class }}</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Selected Characters -->
-    <section class="settings-section" v-if="selectedCharacters.length > 0">
-      <h2>✅ Selected Characters & Specs</h2>
-      <div class="selected-characters">
-        <div v-for="(char, index) in selectedCharacters" :key="index" class="selected-char">
-          <div class="char-header">
-            <span class="char-name-large">{{ char.name }}</span>
-            <select v-model="char.class" class="class-select">
-              <option v-for="className in allClasses" :key="className" :value="className">
-                {{ className }}
-              </option>
-            </select>
-            <button @click="removeCharacter(index)" class="btn-remove">✕</button>
+  <div class="min-h-screen p-4 md:p-8">
+    <div class="container mx-auto max-w-6xl">
+      <div class="bg-white/20 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/30">
+        <div class="p-6 md:p-8">
+          <!-- Header -->
+          <div class="text-center mb-12">
+            <h1 class="text-5xl font-bold mb-3 bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent drop-shadow-lg">Talent Updater</h1>
+            <p class="select-none text-white/90 text-lg drop-shadow">Auto-discover characters and update WoW talents from Archon.gg</p>
           </div>
-          <div class="spec-selection">
-            <label
-              v-for="spec in getClassSpecs(char.class)"
-              :key="spec"
-              class="spec-checkbox"
-            >
-              <input
-                type="checkbox"
-                :checked="char.specializations.includes(spec)"
-                @change="toggleSpec(index, spec)"
-              />
-              {{ spec }}
-            </label>
-          </div>
+
+          <StatusMessages :status-message="statusMessage" :error-message="errorMessage" />
+
+          <!-- Tab Navigation -->
+          <TabNavigation :active-tab="activeTab" @update:active-tab="activeTab = $event" />
+
+          <!-- Active Characters Tab -->
+          <ActiveCharactersTab
+            v-if="activeTab === 'characters'"
+            :selected-characters="selectedCharacters"
+            :discovered-characters="discoveredCharacters"
+            :all-classes="allClasses"
+            :class-specs="classSpecs"
+            :library-expanded="expandedSections.characters"
+            :is-updating="isUpdating"
+            :has-valid-settings="hasValidSettings"
+            @remove:character="removeCharacter"
+            @update:class="(index, className) => selectedCharacters[index].class = className"
+            @toggle:spec="toggleSpec"
+            @toggle:library="toggleLibrary"
+            @add:character="addCharacter"
+            @update:talents="updateTalents"
+          />
+
+          <!-- Game Settings Tab -->
+          <GameSettingsTab
+            v-if="activeTab === 'game'"
+            :wow-path="wowPath"
+            :is-scanning="isScanning"
+            @update:wow-path="wowPath = $event"
+            @find:path="findWowPath"
+            @scan:characters="scanForCharacters"
+            @save:settings="saveSettings"
+          />
+
+          <!-- Content Settings Tab -->
+          <ContentSettingsTab
+            v-if="activeTab === 'content'"
+            :raid-difficulties="raidDifficulties"
+            :raid-bosses="raidBosses"
+            :dungeons="dungeons"
+            :clear-previous-builds="clearPreviousBuilds"
+            :is-discovering="isDiscovering"
+            @toggle:difficulty="toggleDifficulty"
+            @update:raid-bosses="raidBosses = $event"
+            @update:dungeons="dungeons = $event"
+            @update:clear-previous-builds="clearPreviousBuilds = $event"
+            @discover:content="discoverContent"
+            @save:settings="saveSettings"
+          />
         </div>
       </div>
-    </section>
-
-    <!-- Raid Settings -->
-    <section class="settings-section">
-      <h2>🏆 Raid Settings</h2>
-      <div class="form-group">
-        <label>Difficulties:</label>
-        <div class="checkbox-group">
-          <label v-for="diff in ['normal', 'heroic', 'mythic']" :key="diff">
-            <input
-              type="checkbox"
-              :checked="raidDifficulties.includes(diff)"
-              @change="toggleDifficulty(diff)"
-            />
-            {{ diff }}
-          </label>
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Bosses (comma-separated, lowercase-hyphenated):</label>
-        <input
-          v-model="raidBosses"
-          type="text"
-          placeholder="broodtwister, sikran, queen-ansurek"
-          @input="raidBosses = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim())"
-          :value="raidBosses.join(', ')"
-        />
-      </div>
-    </section>
-
-    <!-- M+ Settings -->
-    <section class="settings-section">
-      <h2>⚔️ Mythic+ Settings</h2>
-      <div class="form-group">
-        <label>Dungeons (comma-separated, lowercase-hyphenated):</label>
-        <input
-          v-model="dungeons"
-          type="text"
-          placeholder="ara-kara, city-of-threads, mists-of-tirna-scithe"
-          @input="dungeons = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim())"
-          :value="dungeons.join(', ')"
-        />
-      </div>
-    </section>
-
-    <!-- Other Settings -->
-    <section class="settings-section">
-      <h2>⚙️ Other Settings</h2>
-      <label class="checkbox-label">
-        <input type="checkbox" v-model="clearPreviousBuilds" />
-        Clear all previous auto-generated builds before updating
-      </label>
-    </section>
-
-    <!-- Actions -->
-    <section class="action-section">
-      <button @click="saveSettings" class="btn-secondary">💾 Save Settings</button>
-      <button
-        @click="updateTalents"
-        :disabled="!hasValidSettings || isUpdating"
-        class="btn-update"
-      >
-        <span v-if="!isUpdating">🚀 Update Talents</span>
-        <span v-else>⏳ Updating...</span>
-      </button>
-    </section>
-
-    <!-- Status -->
-    <section v-if="statusMessage || errorMessage" class="status-section">
-      <div v-if="statusMessage" class="status-success">✓ {{ statusMessage }}</div>
-      <div v-if="errorMessage" class="status-error">✗ {{ errorMessage }}</div>
-    </section>
-  </main>
+    </div>
+  </div>
 </template>
 
-<style scoped>
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-header {
-  text-align: center;
-  margin-bottom: 2rem;
-}
-
-h1 {
-  font-size: 2.5rem;
-  margin-bottom: 0.5rem;
-  color: #24c8db;
-}
-
-.subtitle {
-  color: #666;
-  font-size: 1.1rem;
-}
-
-.settings-section {
-  background: #f9f9f9;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
-}
-
-h2 {
-  font-size: 1.3rem;
-  margin-bottom: 1rem;
-  color: #333;
-}
-
-.input-group {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.path-input {
-  flex: 1;
-  padding: 0.6rem 1rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-family: monospace;
-}
-
-.btn-secondary,
-.btn-update {
-  padding: 0.6rem 1.2rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-secondary {
-  background-color: #24c8db;
-  color: white;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background-color: #1da1b5;
-}
-
-.btn-secondary:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
-
-.character-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-}
-
-.character-card {
-  background: white;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.character-card:hover {
-  border-color: #24c8db;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(36, 200, 219, 0.2);
-}
-
-.char-name {
-  font-weight: 600;
-  font-size: 1.1rem;
-  color: #333;
-}
-
-.char-details {
-  font-size: 0.9rem;
-  color: #666;
-  margin-top: 0.25rem;
-}
-
-.selected-characters {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.selected-char {
-  background: white;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
-}
-
-.char-header {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 0.75rem;
-}
-
-.char-name-large {
-  font-weight: 600;
-  font-size: 1.1rem;
-  color: #333;
-}
-
-.class-select {
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 0.9rem;
-}
-
-.btn-remove {
-  margin-left: auto;
-  padding: 0.4rem 0.8rem;
-  background: #f44336;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.btn-remove:hover {
-  background: #d32f2f;
-}
-
-.spec-selection {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.spec-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.8rem;
-  background: #f5f5f5;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.spec-checkbox input {
-  cursor: pointer;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: #333;
-}
-
-.form-group input[type="text"] {
-  width: 100%;
-  padding: 0.6rem 1rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 0.95rem;
-}
-
-.checkbox-group {
-  display: flex;
-  gap: 1rem;
-}
-
-.checkbox-group label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  font-size: 0.95rem;
-}
-
-.action-section {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.btn-update {
-  flex: 1;
-  background-color: #4caf50;
-  color: white;
-  font-size: 1.1rem;
-}
-
-.btn-update:hover:not(:disabled) {
-  background-color: #45a049;
-}
-
-.btn-update:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
-
-.status-section {
-  padding: 1rem;
-  border-radius: 8px;
-}
-
-.status-success {
-  background: #e8f5e9;
-  color: #2e7d32;
-  padding: 1rem;
-  border-radius: 8px;
-  border-left: 4px solid #4caf50;
-}
-
-.status-error {
-  background: #ffebee;
-  color: #c62828;
-  padding: 1rem;
-  border-radius: 8px;
-  border-left: 4px solid #f44336;
-}
-
-@media (prefers-color-scheme: dark) {
-  .settings-section {
-    background: #1a1a1a;
-    border-color: #444;
-  }
-
-  h2 {
-    color: #f6f6f6;
-  }
-
-  .path-input,
-  .class-select,
-  .form-group input[type="text"] {
-    background: #2a2a2a;
-    color: #f6f6f6;
-    border-color: #555;
-  }
-
-  .character-card,
-  .selected-char {
-    background: #2a2a2a;
-    border-color: #555;
-  }
-
-  .char-name,
-  .char-name-large,
-  .form-group label {
-    color: #f6f6f6;
-  }
-
-  .char-details {
-    color: #aaa;
-  }
-
-  .spec-checkbox {
-    background: #333;
-    color: #f6f6f6;
-  }
-}
-</style>

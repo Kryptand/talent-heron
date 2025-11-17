@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -64,6 +64,7 @@ impl WowScanner {
     }
 
     /// Get the path to TalentLoadoutsEx.lua for a specific account
+    #[allow(dead_code)]
     pub fn get_talent_loadouts_path(&self, account_id: &str) -> PathBuf {
         self.wow_path
             .join("WTF")
@@ -168,7 +169,7 @@ impl WowScanner {
     }
 
     /// Try to detect character class from SavedVariables
-    fn detect_character_class(&self, char_path: &Path) -> Result<String> {
+    fn detect_character_class(&self, _char_path: &Path) -> Result<String> {
         // For now, we'll return Unknown - in a full implementation,
         // we'd parse character-specific SavedVariables files to determine class
         // This would require parsing specific addon data files

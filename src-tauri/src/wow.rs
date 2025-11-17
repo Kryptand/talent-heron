@@ -85,6 +85,7 @@ impl WowClass {
     }
 
     /// Get all valid specializations for this class
+    #[allow(dead_code)]
     pub fn valid_specs(&self) -> Vec<&'static str> {
         self.get_spec_map().keys().copied().collect()
     }
