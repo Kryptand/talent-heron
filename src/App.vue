@@ -311,21 +311,21 @@ async function updateTalents() {
     <!-- Hero Banner Section -->
     <div class="relative overflow-hidden">
       <!-- Parallax Background Image -->
-      <div class="absolute inset-0 bg-gradient-to-b from-[#030713] via-[#030713]/80 to-[#030713]">
-        <div class="absolute inset-0 opacity-60">
+      <div class="absolute inset-0">
+        <div class="absolute inset-0 opacity-90">
           <img
             src="/hero-banner.png"
             alt="Talent Heron Banner"
             class="w-full h-full object-cover object-center"
-            style="transform: scale(1.1);"
+            style="transform: scale(1.05);"
           />
         </div>
-        <!-- Gradient Overlay -->
-        <div class="absolute inset-0 bg-gradient-to-b from-transparent via-[#030713]/60 to-[#030713]"></div>
+        <!-- Subtle Gradient Overlay for text readability -->
+        <div class="absolute inset-0 bg-gradient-to-b from-[#030713]/20 via-transparent to-[#030713]/40"></div>
       </div>
 
       <!-- Hero Content -->
-      <div class="relative z-10 container mx-auto px-4 md:px-8 py-16 md:py-24">
+      <div class="relative z-10 container mx-auto px-4 md:px-8 py-20 md:py-32">
         <div class="text-center">
           <h1 class="text-6xl md:text-7xl font-bold mb-4 bg-gradient-to-r from-white via-white to-white/90 bg-clip-text text-transparent drop-shadow-2xl">
             Talent Heron
