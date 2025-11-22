@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Archon Talent Updater",
+  "productName": "Talent Heron",
   "version": "0.1.0",
-  "identifier": "com.andreasgoetze.archon-talent-updater",
+  "identifier": "com.andreasgoetze.talent-heron",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Archon Talent Updater",
+        "title": "Talent Heron",
         "width": 1000,
         "height": 800,
         "minWidth": 800,
