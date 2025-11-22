@@ -313,7 +313,9 @@ async function updateTalents() {
         <div class="p-6 md:p-8">
           <!-- Header -->
           <div class="text-center mb-12">
-            <img src="/ddd.png" alt="Talent Heron" class="mx-auto mb-4 h-24 w-auto" />
+            <div class="mb-6 -mx-6 md:-mx-8 px-6 md:px-8 py-8 bg-gradient-to-r from-[#030713] via-[#030713]/95 to-[#030713]">
+              <img src="/ddd.png" alt="Talent Heron" class="mx-auto h-20 w-auto" />
+            </div>
             <h1 class="text-5xl font-bold mb-3 bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent drop-shadow-lg">Talent Heron</h1>
             <p class="select-none text-white text-lg drop-shadow-lg">Auto-discover characters and update WoW talents from Archon.gg</p>
           </div>
