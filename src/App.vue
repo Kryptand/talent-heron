@@ -58,6 +58,8 @@ const expandedSections = ref({
   characters: selectedCharacters.value.length > 0,
 });
 const appInitialized = ref(false);
+const showSplash = ref(true);
+const splashFadingOut = ref(false);
 
 const allClasses = [
   "Warrior", "Paladin", "Hunter", "Rogue", "Priest",
@@ -90,6 +92,15 @@ function toggleLibrary() {
 }
 
 onMounted(async () => {
+  // Start splash fade out after 2 seconds
+  setTimeout(() => {
+    splashFadingOut.value = true;
+    // Hide splash completely after animation finishes
+    setTimeout(() => {
+      showSplash.value = false;
+    }, 1000);
+  }, 2000);
+
   await loadSettings();
   if (wowPath.value) {
     await scanForCharacters();
@@ -308,6 +319,28 @@ async function updateTalents() {
 
 <template>
   <div class="min-h-screen">
+    <!-- Splash Screen -->
+    <div
+      v-if="showSplash"
+      class="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-1000"
+      :class="{ 'opacity-0': splashFadingOut, 'opacity-100': !splashFadingOut }"
+    >
+      <div class="absolute inset-0">
+        <img
+          src="/hero-banner.png"
+          alt="Talent Heron"
+          class="w-full h-full object-cover object-center"
+        />
+        <!-- Gradient overlay -->
+        <div class="absolute inset-0 bg-gradient-to-b from-[#060719]/40 via-[#222972]/30 to-[#41b2f4]/35"></div>
+      </div>
+      <div class="relative z-10 text-center">
+        <h1 class="text-8xl md:text-9xl font-bold bg-gradient-to-r from-white via-white to-white/90 bg-clip-text text-transparent drop-shadow-2xl animate-pulse">
+          Talent Heron
+        </h1>
+      </div>
+    </div>
+
     <!-- Hero Banner Section -->
     <div class="relative overflow-hidden">
       <!-- Parallax Background Image -->
