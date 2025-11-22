@@ -307,19 +307,41 @@ async function updateTalents() {
 </script>
 
 <template>
-  <div class="min-h-screen p-4 md:p-8">
-    <div class="container mx-auto max-w-6xl">
+  <div class="min-h-screen">
+    <!-- Hero Banner Section -->
+    <div class="relative overflow-hidden">
+      <!-- Parallax Background Image -->
+      <div class="absolute inset-0 bg-gradient-to-b from-[#030713] via-[#030713]/80 to-[#030713]">
+        <div class="absolute inset-0 opacity-60">
+          <img
+            src="/hero-banner.png"
+            alt="Talent Heron Banner"
+            class="w-full h-full object-cover object-center"
+            style="transform: scale(1.1);"
+          />
+        </div>
+        <!-- Gradient Overlay -->
+        <div class="absolute inset-0 bg-gradient-to-b from-transparent via-[#030713]/60 to-[#030713]"></div>
+      </div>
+
+      <!-- Hero Content -->
+      <div class="relative z-10 container mx-auto px-4 md:px-8 py-16 md:py-24">
+        <div class="text-center">
+          <img src="/talent-heron.png" alt="Talent Heron" class="mx-auto h-24 md:h-32 w-auto mb-6 drop-shadow-2xl" />
+          <h1 class="text-6xl md:text-7xl font-bold mb-4 bg-gradient-to-r from-white via-white to-white/90 bg-clip-text text-transparent drop-shadow-2xl">
+            Talent Heron
+          </h1>
+          <p class="text-white/90 text-xl md:text-2xl drop-shadow-lg max-w-2xl mx-auto">
+            Auto-discover characters and update WoW talents from Archon.gg
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container mx-auto max-w-6xl px-4 md:px-8 py-8">
       <div class="bg-white/20 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/30">
         <div class="p-6 md:p-8">
-          <!-- Header -->
-          <div class="text-center mb-12">
-            <div class="mb-6 -mx-6 md:-mx-8 px-6 md:px-8 py-8 bg-gradient-to-r from-[#030713] via-[#030713]/95 to-[#030713]">
-              <img src="/ddd.png" alt="Talent Heron" class="mx-auto h-20 w-auto" />
-            </div>
-            <h1 class="text-5xl font-bold mb-3 bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent drop-shadow-lg">Talent Heron</h1>
-            <p class="select-none text-white text-lg drop-shadow-lg">Auto-discover characters and update WoW talents from Archon.gg</p>
-          </div>
-
           <StatusMessages :status-message="statusMessage" :error-message="errorMessage" />
 
           <!-- Tab Navigation -->
