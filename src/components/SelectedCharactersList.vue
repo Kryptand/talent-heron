@@ -32,12 +32,12 @@ function updateClass(index: number, event: Event) {
           <div class="p-4">
             <div class="flex items-center gap-3 mb-3">
               <span class="font-bold text-lg text-white drop-shadow">{{ char.name }}</span>
-              <select :value="char.class" @change="updateClass(index, $event)" class="px-3 py-2 pr-8 bg-white/25 backdrop-blur-xl border border-white/40 rounded-lg text-white font-semibold focus:outline-none focus:ring-2 focus:ring-white/50 transition-all shadow-lg appearance-none cursor-pointer" style="-webkit-appearance: none; -moz-appearance: none; background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22%3E%3Cpath fill=%22%23ffffff%22 d=%22M6 8L0 0h12z%22/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 0.75rem center; background-size: 0.65rem;">
-                <option v-for="className in allClasses" :key="className" :value="className" class="bg-purple-900 text-white">
+              <select :value="char.class" @change="updateClass(index, $event)" class="px-3 py-2 pr-8 bg-white/25 backdrop-blur-xl border border-white/40 rounded-lg text-white font-semibold focus:outline-none focus:ring-2 focus:ring-ocean/50 transition-all shadow-lg appearance-none cursor-pointer" style="-webkit-appearance: none; -moz-appearance: none; background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22%3E%3Cpath fill=%22%23ffffff%22 d=%22M6 8L0 0h12z%22/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 0.75rem center; background-size: 0.65rem;">
+                <option v-for="className in allClasses" :key="className" :value="className" class="bg-ocean-dark text-white">
                   {{ className }}
                 </option>
               </select>
-              <button @click="$emit('remove', index)" class="px-4 py-2 text-sm text-white bg-red-500/30 backdrop-blur-lg border border-white/20 rounded-lg shadow-lg hover:shadow-xl hover:bg-red-500/40 ml-auto transition-all duration-300">Remove</button>
+              <button @click="$emit('remove', index)" class="px-4 py-2 text-sm text-white bg-ocean-pink/30 backdrop-blur-lg border border-white/20 rounded-lg shadow-lg hover:shadow-xl hover:bg-ocean-pink/40 ml-auto transition-all duration-300">Remove</button>
             </div>
             <div class="flex flex-wrap gap-2">
               <label
@@ -64,7 +64,7 @@ function updateClass(index: number, event: Event) {
   <div v-else class="bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-xl">
     <div class="text-center py-12 px-6">
       <h3 class="text-2xl font-bold text-white mb-2 drop-shadow-lg">No active characters yet</h3>
-      <p class="text-white/90 text-lg font-medium">Add characters from the Character Library below to get started</p>
+      <p class="text-white text-lg font-medium">Add characters from the Character Library below to get started</p>
     </div>
   </div>
 </template>

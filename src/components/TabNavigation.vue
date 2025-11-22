@@ -23,7 +23,7 @@ defineEmits<{
         'duration-300',
         {
           'bg-white/30 backdrop-blur-lg shadow-lg text-white font-bold': activeTab === 'characters',
-          'text-white/80 hover:text-white hover:bg-white/10': activeTab !== 'characters'
+          'text-white/90 hover:text-white hover:bg-white/10': activeTab !== 'characters'
         }
       ]"
     >

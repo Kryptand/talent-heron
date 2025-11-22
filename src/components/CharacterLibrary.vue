@@ -51,7 +51,7 @@ const groupedCharacters = computed(() => {
       <h2 @click="$emit('toggle')" class="text-2xl font-bold text-white cursor-pointer hover:text-white/80 select-none transition-colors flex items-center gap-2 drop-shadow-lg">
         <span class="text-lg">{{ expanded ? '▼' : '▶' }}</span>
         Character Library
-        <span class="text-sm font-normal text-white/90">({{ discoveredCharacters.length }} discovered)</span>
+        <span class="text-sm font-normal text-white">({{ discoveredCharacters.length }} discovered)</span>
       </h2>
       <div v-if="expanded" class="mt-4 space-y-4">
         <!-- Search -->
@@ -59,7 +59,7 @@ const groupedCharacters = computed(() => {
           v-model="characterSearch"
           type="text"
           placeholder="Search characters, realms, classes, or accounts..."
-          class="w-full px-4 py-3 bg-white/15 backdrop-blur-md border border-white/30 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
+          class="w-full px-4 py-3 bg-white/15 backdrop-blur-md border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-ocean/50 transition-all"
         />
 
         <!-- Grouped Characters -->
@@ -72,7 +72,7 @@ const groupedCharacters = computed(() => {
             <div class="p-4">
               <div class="flex justify-between items-center mb-3 pb-2 border-b border-white/30">
                 <span class="font-bold text-white drop-shadow">Account: {{ accountId }}</span>
-                <span class="text-sm text-white/90 font-medium">{{ chars.length }} character(s)</span>
+                <span class="text-sm text-white font-medium">{{ chars.length }} character(s)</span>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div
@@ -90,7 +90,7 @@ const groupedCharacters = computed(() => {
             </div>
           </div>
         </div>
-        <div v-else class="text-center py-8 text-white/90 italic font-medium">
+        <div v-else class="text-center py-8 text-white italic font-medium">
           No characters found. Go to Game Settings to scan for characters.
         </div>
       </div>

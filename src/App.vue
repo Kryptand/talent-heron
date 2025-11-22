@@ -314,7 +314,7 @@ async function updateTalents() {
           <!-- Header -->
           <div class="text-center mb-12">
             <h1 class="text-5xl font-bold mb-3 bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent drop-shadow-lg">Talent Updater</h1>
-            <p class="select-none text-white/90 text-lg drop-shadow">Auto-discover characters and update WoW talents from Archon.gg</p>
+            <p class="select-none text-white text-lg drop-shadow-lg">Auto-discover characters and update WoW talents from Archon.gg</p>
           </div>
 
           <StatusMessages :status-message="statusMessage" :error-message="errorMessage" />
