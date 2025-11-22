@@ -358,7 +358,7 @@ async function updateTalents() {
       <!-- Hero Content -->
       <div class="relative z-10 container mx-auto px-4 md:px-8 py-20 md:py-32">
         <div class="text-center">
-          <h1 class="text-6xl md:text-7xl font-bold mb-4 bg-gradient-to-r from-white via-white to-white/90 bg-clip-text text-transparent drop-shadow-2xl">
+          <h1 class="text-6xl md:text-7xl font-bold mb-4 text-white drop-shadow-2xl">
             Talent Heron
           </h1>
           <p class="text-white/90 text-xl md:text-2xl drop-shadow-lg max-w-2xl mx-auto">
