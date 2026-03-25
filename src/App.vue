@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 import { load } from "@tauri-apps/plugin-store";
 import TabNavigation from "./components/TabNavigation.vue";
@@ -69,9 +70,12 @@ interface UpdateInfo {
   latest_version: string;
   release_url: string;
   release_notes: string;
+  download_url: string | null;
 }
 const updateInfo = ref<UpdateInfo | null>(null);
 const updateDismissed = ref(false);
+const updateDownloadProgress = ref<number | null>(null);
+const updateDownloadError = ref('');
 const addonInstalled = ref<boolean | null>(null);
 
 const isFirstRun = ref(false);
@@ -233,6 +237,23 @@ async function findWowPath() {
 
 async function openUrl(url: string) {
   try { await tauriOpenUrl(url); } catch { /* ignore */ }
+}
+
+async function downloadUpdate(url: string) {
+  updateDownloadProgress.value = 0;
+  updateDownloadError.value = '';
+
+  const unlisten = await listen<number>('update-progress', (event) => {
+    updateDownloadProgress.value = event.payload;
+  });
+
+  try {
+    await invoke('download_and_install_update', { url });
+  } catch (e) {
+    updateDownloadError.value = String(e);
+    updateDownloadProgress.value = null;
+    unlisten();
+  }
 }
 
 async function checkAddon() {
@@ -484,8 +505,37 @@ async function updateTalents() {
           <div v-if="updateInfo.release_notes" class="mb-5 text-sm text-[#7aadcc] bg-[#0d1e33] rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap">
             {{ updateInfo.release_notes }}
           </div>
-          <div class="flex gap-2">
+          <!-- Download progress -->
+          <div v-if="updateDownloadProgress !== null" class="mb-4">
+            <div class="flex justify-between text-xs text-[#7aadcc] mb-1.5">
+              <span>{{ updateDownloadProgress >= 100 ? 'Installing...' : 'Downloading...' }}</span>
+              <span>{{ updateDownloadProgress >= 100 ? '100%' : `${updateDownloadProgress}%` }}</span>
+            </div>
+            <div class="w-full h-2 bg-[#07101e] rounded-full overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="updateDownloadProgress >= 100 ? 'bg-emerald-500' : 'bg-[#3b82f6]'"
+                :style="`width: ${Math.min(updateDownloadProgress, 100)}%`"
+              />
+            </div>
+            <p v-if="updateDownloadProgress >= 100" class="text-xs text-emerald-400 mt-2">
+              Done! App is restarting...
+            </p>
+          </div>
+
+          <div v-if="updateDownloadError" class="mb-3 text-xs text-red-400 bg-red-900/15 border border-red-900/30 rounded-lg px-3 py-2">
+            {{ updateDownloadError }}
+          </div>
+
+          <div class="flex gap-2" v-if="updateDownloadProgress === null">
             <button
+              v-if="updateInfo.download_url"
+              @click="downloadUpdate(updateInfo.download_url)"
+              class="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-[#1d4ed8] to-[#3b82f6] hover:from-[#1e40af] hover:to-[#2563eb] text-white text-sm font-semibold transition-all"
+              style="box-shadow: 0 2px 12px rgba(59,130,246,0.25)"
+            >Download &amp; Install</button>
+            <button
+              v-else
               @click="openUrl(updateInfo.release_url); updateDismissed = true"
               class="flex-1 py-2.5 rounded-lg bg-[#1d4ed8] hover:bg-[#2563eb] text-white text-sm font-medium transition-colors"
             >Open Release Page</button>

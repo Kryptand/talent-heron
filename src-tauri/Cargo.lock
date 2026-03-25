@@ -4064,11 +4064,12 @@ dependencies = [
 
 [[package]]
 name = "talent-heron"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "chrono",
  "full_moon",
+ "futures-util",
  "reqwest",
  "scraper",
  "serde",

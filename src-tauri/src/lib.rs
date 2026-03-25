@@ -88,6 +88,14 @@ async fn check_for_updates() -> Result<UpdateInfo, String> {
         .map_err(|e| format!("Failed to check for updates: {}", e))
 }
 
+/// Tauri command to download and install an update
+#[tauri::command]
+async fn download_and_install_update(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    updater::download_and_install(app, url)
+        .await
+        .map_err(|e| format!("Update failed: {}", e))
+}
+
 /// Tauri command to auto-discover current raids and dungeons from Warcraft Logs
 #[tauri::command]
 async fn discover_content() -> Result<DiscoveredContent, String> {
@@ -111,6 +119,7 @@ pub fn run() {
             update_talents,
             discover_content,
             check_for_updates,
+            download_and_install_update,
             check_addon_installed
         ])
         .run(tauri::generate_context!())
