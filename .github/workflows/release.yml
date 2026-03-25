@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: talent-heron
+            release_name: talent-heron-linux-x86_64
+
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: talent-heron.exe
+            release_name: talent-heron-windows-x86_64.exe
+
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: talent-heron
+            release_name: talent-heron-macos-aarch64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            pkg-config
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        run: npm run tauri build -- --target ${{ matrix.target }}
+
+      - name: Locate and rename binary (Linux/macOS)
+        if: matrix.platform != 'windows-latest'
+        run: |
+          BIN=$(find src-tauri/target/${{ matrix.target }}/release -maxdepth 1 -name "talent-heron" -type f | head -1)
+          cp "$BIN" "${{ matrix.release_name }}"
+
+      - name: Locate and rename binary (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $bin = Get-ChildItem -Path "src-tauri/target/${{ matrix.target }}/release" -Filter "talent-heron.exe" -File | Select-Object -First 1
+          Copy-Item $bin.FullName "${{ matrix.release_name }}"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.release_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

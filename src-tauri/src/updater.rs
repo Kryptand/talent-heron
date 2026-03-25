@@ -11,7 +11,7 @@ const RELEASES_API: &str = "https://api.github.com/repos/Kryptand/talent-heron/r
 #[cfg(target_os = "linux")]
 const ASSET_NAME: &str = "talent-heron-linux-x86_64";
 #[cfg(target_os = "macos")]
-const ASSET_NAME: &str = "talent-heron-macos-x86_64";
+const ASSET_NAME: &str = "talent-heron-macos-aarch64";
 #[cfg(target_os = "windows")]
 const ASSET_NAME: &str = "talent-heron-windows-x86_64.exe";
 
