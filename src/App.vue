@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 import { load } from "@tauri-apps/plugin-store";
 import TabNavigation from "./components/TabNavigation.vue";
 import ActiveCharactersTab from "./components/ActiveCharactersTab.vue";
@@ -75,36 +76,39 @@ const addonInstalled = ref<boolean | null>(null);
 
 const isFirstRun = ref(false);
 const setupStep = ref<'idle' | 'detecting' | 'scanning' | 'content' | 'done' | 'error'>('idle');
-const setupStepsDone = ref<Set<string>>(new Set());
+const setupStepsDone = ref<Record<string, boolean>>({});
 const setupError = ref('');
 const setupResults = ref({ chars: 0, bosses: 0, dungeons: 0 });
 
 async function runQuickSetup() {
   setupStep.value = 'detecting';
-  setupStepsDone.value = new Set();
+  setupStepsDone.value = {};
   setupError.value = '';
+  await nextTick();
   try {
     // Step 1: detect WoW path
     const path = await invoke<string>('find_wow_path');
     wowPath.value = path;
-    setupStepsDone.value = new Set([...setupStepsDone.value, 'detecting']);
+    setupStepsDone.value = { ...setupStepsDone.value, detecting: true };
 
     // Step 2: scan characters
     setupStep.value = 'scanning';
+    await nextTick();
     const chars = await invoke<DiscoveredCharacter[]>('scan_characters', { wowPath: path });
     discoveredCharacters.value = chars;
     setupResults.value.chars = chars.length;
-    setupStepsDone.value = new Set([...setupStepsDone.value, 'scanning']);
+    setupStepsDone.value = { ...setupStepsDone.value, scanning: true };
 
     // Step 3: discover content
     setupStep.value = 'content';
+    await nextTick();
     const content = await invoke<{ raid_bosses: string[], dungeons: string[] }>('discover_content');
     raidBosses.value = content.raid_bosses;
     dungeons.value = content.dungeons;
     raidDifficulties.value = ['normal', 'heroic'];
     setupResults.value.bosses = content.raid_bosses.length;
     setupResults.value.dungeons = content.dungeons.length;
-    setupStepsDone.value = new Set([...setupStepsDone.value, 'content']);
+    setupStepsDone.value = { ...setupStepsDone.value, content: true };
 
     await saveSettings(false);
     setupStep.value = 'done';
@@ -225,6 +229,10 @@ async function findWowPath() {
   } catch (error) {
     errorMessage.value = `Could not find WoW installation automatically. Please set the path manually.`;
   }
+}
+
+async function openUrl(url: string) {
+  try { await tauriOpenUrl(url); } catch { /* ignore */ }
 }
 
 async function checkAddon() {
@@ -411,23 +419,29 @@ async function updateTalents() {
 
           <!-- Steps -->
           <div class="space-y-4 mb-8 text-left">
-            <template v-for="item in [
-              { key: 'detecting', label: 'Detect WoW installation', result: wowPath || null },
-              { key: 'scanning',  label: 'Scan characters', result: setupStepsDone.has('scanning') ? `${setupResults.chars} found` : null },
-              { key: 'content',   label: 'Fetch raid & dungeon content', result: setupStepsDone.has('content') ? `${setupResults.bosses} bosses, ${setupResults.dungeons} dungeons` : null },
-            ]" :key="item.key">
-              <div class="flex items-start gap-3 text-sm">
-                <span class="mt-0.5 w-5 h-5 flex items-center justify-center rounded-full text-xs shrink-0 transition-all"
-                  :class="setupStep === item.key ? 'bg-[#1d4ed8] text-white' : setupStepsDone.has(item.key) ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/20'">
-                  <svg v-if="setupStep === item.key" class="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-                  <span v-else>✓</span>
-                </span>
-                <div>
-                  <div :class="setupStep === item.key ? 'text-white' : setupStepsDone.has(item.key) ? 'text-white/80' : 'text-[#4a7fa8]'">{{ item.label }}</div>
-                  <div v-if="item.result" class="text-xs text-emerald-400 mt-0.5">{{ item.result }}</div>
+            <div v-for="item in [
+              { key: 'detecting', label: 'Detect WoW installation', result: setupStepsDone['detecting'] ? (wowPath || 'found') : null },
+              { key: 'scanning',  label: 'Scan characters',         result: setupStepsDone['scanning']  ? `${setupResults.chars} found` : null },
+              { key: 'content',   label: 'Fetch raids & dungeons',  result: setupStepsDone['content']   ? `${setupResults.bosses} bosses, ${setupResults.dungeons} dungeons` : null },
+            ]" :key="item.key" class="flex items-start gap-3 text-sm">
+              <span class="mt-0.5 w-5 h-5 flex items-center justify-center rounded-full text-xs shrink-0 transition-all"
+                :class="setupStep === item.key
+                  ? 'bg-[#1d4ed8] text-white'
+                  : setupStepsDone[item.key]
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : 'bg-[#1e3a5f]/40 text-[#3a5870]'">
+                <svg v-if="setupStep === item.key" class="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+                </svg>
+                <span v-else-if="setupStepsDone[item.key]">✓</span>
+              </span>
+              <div>
+                <div :class="setupStep === item.key ? 'text-[#e2eeff]' : setupStepsDone[item.key] ? 'text-[#b0cce0]' : 'text-[#5580a0]'">
+                  {{ item.label }}
                 </div>
+                <div v-if="item.result" class="text-xs text-emerald-400 mt-0.5">{{ item.result }}</div>
               </div>
-            </template>
+            </div>
           </div>
 
           <p v-if="setupStep === 'error'" class="text-xs text-red-400 mb-4 text-left bg-red-900/20 rounded-lg p-3">{{ setupError }}</p>
@@ -471,12 +485,10 @@ async function updateTalents() {
             {{ updateInfo.release_notes }}
           </div>
           <div class="flex gap-2">
-            <a
-              :href="updateInfo.release_url"
-              target="_blank"
-              class="flex-1 text-center py-2.5 rounded-lg bg-[#1d4ed8] hover:bg-[#2563eb] text-white text-sm font-medium transition-colors"
-              @click="updateDismissed = true"
-            >Download Update</a>
+            <button
+              @click="openUrl(updateInfo.release_url); updateDismissed = true"
+              class="flex-1 py-2.5 rounded-lg bg-[#1d4ed8] hover:bg-[#2563eb] text-white text-sm font-medium transition-colors"
+            >Open Release Page</button>
             <button
               @click="updateDismissed = true"
               class="px-4 py-2.5 rounded-lg border border-[#1e3a5f] hover:border-[#2e5a9a] text-[#7aadcc] hover:text-[#b0cce0] text-sm transition-colors"
