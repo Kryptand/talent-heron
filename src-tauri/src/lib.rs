@@ -4,12 +4,14 @@ mod config;
 mod fetcher;
 mod lua_talent;
 mod orchestrator;
+mod updater;
 mod warcraft_logs;
 mod wow;
 mod wow_scanner;
 
 use config::Config;
 use orchestrator::{TalentOrchestrator, UpdateSummary};
+use updater::UpdateInfo;
 use warcraft_logs::{DiscoveredContent, WarcraftLogsService};
 use wow_scanner::{DiscoveredCharacter, WowScanner};
 
@@ -70,6 +72,22 @@ async fn update_talents(config_path: String) -> Result<String, String> {
     Ok("Talents updated successfully!".to_string())
 }
 
+/// Tauri command to check if TalentLoadoutsEx addon is installed
+#[tauri::command]
+fn check_addon_installed(wow_path: String) -> bool {
+    std::path::Path::new(&wow_path)
+        .join("Interface/AddOns/TalentLoadoutsEx")
+        .exists()
+}
+
+/// Tauri command to check for updates on GitHub
+#[tauri::command]
+async fn check_for_updates() -> Result<UpdateInfo, String> {
+    updater::check_for_updates()
+        .await
+        .map_err(|e| format!("Failed to check for updates: {}", e))
+}
+
 /// Tauri command to auto-discover current raids and dungeons from Warcraft Logs
 #[tauri::command]
 async fn discover_content() -> Result<DiscoveredContent, String> {
@@ -91,7 +109,9 @@ pub fn run() {
             scan_characters,
             update_talents_from_config,
             update_talents,
-            discover_content
+            discover_content,
+            check_for_updates,
+            check_addon_installed
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

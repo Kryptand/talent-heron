@@ -1,7 +1,12 @@
 use anyhow::{Context, Result};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
-const WARCRAFT_LOGS_API: &str = "https://www.warcraftlogs.com/zone-sidebar/v2/";
+const RAID_DISCOVERY_URL: &str =
+    "https://www.archon.gg/wow/builds/frost/mage/raid/overview/heroic/imperator";
+const MYTHIC_PLUS_DISCOVERY_URL: &str =
+    "https://www.archon.gg/wow/builds/frost/mage/mythic-plus/overview/10/maisara-caverns/this-week";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DiscoveredContent {
@@ -9,109 +14,22 @@ pub struct DiscoveredContent {
     pub dungeons: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ZoneSidebarResponse {
-    #[serde(default)]
-    #[allow(dead_code)]
-    title: String,
-    id: String,
-    #[serde(default)]
-    expansions: Vec<Expansion>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Expansion {
-    #[serde(default)]
-    #[allow(dead_code)]
-    title: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    id: String,
-    #[serde(default)]
-    panel: Option<Panel>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Panel {
-    #[serde(default)]
-    sections: Vec<Section>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Section {
-    #[serde(default)]
-    header: Option<Header>,
-    #[serde(default)]
-    children: Vec<Child>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Header {
-    #[serde(rename = "contentTypeName", default)]
-    content_type_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Child {
-    #[serde(default)]
-    title: String,
-    #[serde(rename = "type", default)]
-    child_type: String,
-}
-
 pub struct WarcraftLogsService;
 
 impl WarcraftLogsService {
     pub async fn discover_current_content() -> Result<DiscoveredContent> {
-        // Fetch data from Warcraft Logs API
-        let response = reqwest::get(WARCRAFT_LOGS_API)
-            .await
-            .context("Failed to fetch from Warcraft Logs API")?;
+        let client = Client::builder()
+            .user_agent("ArchonConfigUpdater/1.0")
+            .build()
+            .context("Failed to create HTTP client")?;
 
-        let data: Vec<ZoneSidebarResponse> = response
-            .json()
-            .await
-            .context("Failed to parse Warcraft Logs response")?;
+        let (raid_html, mp_html) = tokio::try_join!(
+            Self::fetch(&client, RAID_DISCOVERY_URL),
+            Self::fetch(&client, MYTHIC_PLUS_DISCOVERY_URL),
+        )?;
 
-        let mut raid_bosses = Vec::new();
-        let mut dungeons = Vec::new();
-
-        // Get raid bosses
-        if let Some(raid_section) = data.iter().find(|x| x.id == "raid-content") {
-            if let Some(current_expansion) = raid_section.expansions.first() {
-                if let Some(panel) = &current_expansion.panel {
-                    for section in &panel.sections {
-                        if let Some(header) = &section.header {
-                            if header.content_type_name == "zones" {
-                                for child in &section.children {
-                                    if child.child_type == "boss" && !child.title.is_empty() {
-                                        let boss_slug = Self::to_slug(&child.title);
-                                        raid_bosses.push(boss_slug);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Get dungeons (M+ season)
-        if let Some(dungeon_section) = data.iter().find(|x| x.id == "dungeons-content") {
-            if let Some(current_expansion) = dungeon_section.expansions.first() {
-                if let Some(panel) = &current_expansion.panel {
-                    // Get the first section (current season)
-                    if let Some(current_season) = panel.sections.first() {
-                        for child in &current_season.children {
-                            if child.child_type == "boss" && !child.title.is_empty() {
-                                let dungeon_slug = Self::to_slug(&child.title);
-                                dungeons.push(dungeon_slug);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let raid_bosses = Self::extract_raid_bosses(&raid_html)?;
+        let dungeons = Self::extract_dungeons(&mp_html)?;
 
         Ok(DiscoveredContent {
             raid_bosses,
@@ -119,42 +37,64 @@ impl WarcraftLogsService {
         })
     }
 
-    /// Convert a name to a URL-friendly slug (lowercase with hyphens)
-    /// Matches the C# implementation in ConvertToUrlFriendlyName
-    fn to_slug(name: &str) -> String {
-        name.replace("'", "")
-            .replace(",", "")
-            .replace(":", "")
-            .replace("\"", "")
-            .replace("(", "")
-            .replace(")", "")
-            .replace(".", "")
-            .replace("!", "")
-            .replace("&", "")
-            .trim()
-            .to_lowercase()
-            .replace(" ", "-")
-            .replace("--", "-")
+    async fn fetch(client: &Client, url: &str) -> Result<String> {
+        client
+            .get(url)
+            .send()
+            .await
+            .context("Failed to fetch page")?
+            .text()
+            .await
+            .context("Failed to read response body")
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    /// Extract boss slugs from the JSON data embedded in the Archon.gg raid page.
+    /// Looks for: "url":"/wow/builds/frost/mage/raid/overview/heroic/{slug}"
+    fn extract_raid_bosses(html: &str) -> Result<Vec<String>> {
+        const PREFIX: &str = "\"/wow/builds/frost/mage/raid/overview/heroic/";
+        let mut seen = HashSet::new();
+        let mut bosses = Vec::new();
 
-    #[test]
-    fn test_to_slug() {
-        assert_eq!(
-            WarcraftLogsService::to_slug("Queen Ansurek"),
-            "queen-ansurek"
-        );
-        assert_eq!(
-            WarcraftLogsService::to_slug("The Dawnbreaker"),
-            "the-dawnbreaker"
-        );
-        assert_eq!(
-            WarcraftLogsService::to_slug("Mists of Tirna Scithe"),
-            "mists-of-tirna-scithe"
-        );
+        let mut remaining = html;
+        while let Some(pos) = remaining.find(PREFIX) {
+            remaining = &remaining[pos + PREFIX.len()..];
+            if let Some(end) = remaining.find('"') {
+                let slug = &remaining[..end];
+                if !slug.is_empty() && !slug.contains('#') && slug != "all-bosses" {
+                    if seen.insert(slug.to_string()) {
+                        bosses.push(slug.to_string());
+                    }
+                }
+                remaining = &remaining[end..];
+            }
+        }
+
+        Ok(bosses)
+    }
+
+    /// Extract dungeon slugs from the JSON data embedded in the Archon.gg M+ page.
+    /// Looks for: "url":"/wow/builds/frost/mage/mythic-plus/overview/10//{slug}/this-week"
+    fn extract_dungeons(html: &str) -> Result<Vec<String>> {
+        const PREFIX: &str = "\"/wow/builds/frost/mage/mythic-plus/overview/10/";
+        let mut seen = HashSet::new();
+        let mut dungeons = Vec::new();
+
+        let mut remaining = html;
+        while let Some(pos) = remaining.find(PREFIX) {
+            remaining = &remaining[pos + PREFIX.len()..];
+            if let Some(end) = remaining.find('"') {
+                let full = &remaining[..end];
+                // full is like "maisara-caverns/this-week" — take only the slug part
+                let slug = full.split('/').next().unwrap_or("");
+                if !slug.is_empty() && slug != "all-dungeons" {
+                    if seen.insert(slug.to_string()) {
+                        dungeons.push(slug.to_string());
+                    }
+                }
+                remaining = &remaining[end..];
+            }
+        }
+
+        Ok(dungeons)
     }
 }

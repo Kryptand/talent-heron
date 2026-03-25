@@ -7,6 +7,7 @@ interface DiscoveredCharacter {
   realm: string;
   class: string;
   accountId: string;
+  lastPlayed: number;
 }
 
 interface SelectedCharacter {
@@ -55,16 +56,21 @@ defineEmits<{
       @add="$emit('add:character', $event)"
     />
 
-    <!-- Update Action -->
-    <div class="mt-6">
+    <!-- Update CTA -->
+    <div class="mt-2">
       <button
         @click="$emit('update:talents')"
         :disabled="!hasValidSettings || isUpdating"
-        class="w-full px-6 py-4 text-lg font-semibold text-white bg-ocean/30 backdrop-blur-lg border border-white/20 rounded-xl shadow-lg hover:shadow-xl hover:bg-ocean/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+        class="w-full px-6 py-4 text-base font-semibold text-white rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+        :class="hasValidSettings && !isUpdating
+          ? 'bg-gradient-to-r from-[#1d4ed8] to-[#3b82f6] hover:from-[#1e40af] hover:to-[#2563eb] shadow-lg'
+          : 'bg-[#172e4a] border border-[#1e3a5f]'"
+        :style="hasValidSettings && !isUpdating ? 'box-shadow: 0 4px 24px rgba(59,130,246,0.25)' : ''"
       >
-        <span v-if="!isUpdating">Update Talents for All Characters</span>
-        <span v-else class="loading loading-spinner"></span>
-        <span v-if="isUpdating">Updating...</span>
+        <svg v-if="isUpdating" class="animate-spin w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+        </svg>
+        {{ isUpdating ? 'Updating...' : 'Update Talents for All Characters' }}
       </button>
     </div>
   </div>

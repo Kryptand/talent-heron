@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// Represents a discovered WoW character
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,6 +12,8 @@ pub struct DiscoveredCharacter {
     pub realm: String,
     pub class: String,
     pub account_id: String,
+    /// Unix timestamp of last login (from config-cache.wtf mtime), 0 if unknown
+    pub last_played: u64,
 }
 
 /// Scanner for finding WoW installation and characters
@@ -52,10 +55,16 @@ impl WowScanner {
         #[cfg(target_os = "linux")]
         {
             if let Ok(home) = std::env::var("HOME") {
-                let path = PathBuf::from(home)
-                    .join(".wine/drive_c/Program Files (x86)/World of Warcraft/_retail_");
-                if path.exists() {
-                    return Some(path);
+                let candidates = [
+                    PathBuf::from(&home).join("Games/World of Warcraft/_retail_"),
+                    PathBuf::from(&home).join(".wine/drive_c/Program Files (x86)/World of Warcraft/_retail_"),
+                    PathBuf::from(&home).join("Games/battlenet/World of Warcraft/_retail_"),
+                    PathBuf::from("/opt/games/World of Warcraft/_retail_"),
+                ];
+                for path in &candidates {
+                    if path.exists() {
+                        return Some(path.clone());
+                    }
                 }
             }
         }
@@ -74,7 +83,7 @@ impl WowScanner {
             .join("TalentLoadoutsEx.lua")
     }
 
-    /// Scan for all characters in the WoW installation
+    /// Scan for all characters in the WoW installation, sorted by most recently played
     pub fn scan_characters(&self) -> Result<Vec<DiscoveredCharacter>> {
         let wtf_path = self.wow_path.join("WTF").join("Account");
 
@@ -84,7 +93,6 @@ impl WowScanner {
 
         let mut characters = Vec::new();
 
-        // Iterate through each account folder
         for account_entry in fs::read_dir(&wtf_path)? {
             let account_entry = account_entry?;
             let account_path = account_entry.path();
@@ -99,20 +107,12 @@ impl WowScanner {
                 .unwrap_or("")
                 .to_string();
 
-            // Skip SavedVariables folder (it's at account level, not a character)
             if account_id == "SavedVariables" {
                 continue;
             }
 
-            // Scan realms within this account
-            let realms_path = account_path.clone();
-            if let Ok(realm_entries) = fs::read_dir(&realms_path) {
-                for realm_entry in realm_entries {
-                    let realm_entry = realm_entry.ok();
-                    if realm_entry.is_none() {
-                        continue;
-                    }
-                    let realm_entry = realm_entry.unwrap();
+            if let Ok(realm_entries) = fs::read_dir(&account_path) {
+                for realm_entry in realm_entries.flatten() {
                     let realm_path = realm_entry.path();
 
                     if !realm_path.is_dir() {
@@ -125,19 +125,12 @@ impl WowScanner {
                         .unwrap_or("")
                         .to_string();
 
-                    // Skip SavedVariables at this level too
                     if realm_name == "SavedVariables" {
                         continue;
                     }
 
-                    // Scan characters within this realm
                     if let Ok(char_entries) = fs::read_dir(&realm_path) {
-                        for char_entry in char_entries {
-                            let char_entry = char_entry.ok();
-                            if char_entry.is_none() {
-                                continue;
-                            }
-                            let char_entry = char_entry.unwrap();
+                        for char_entry in char_entries.flatten() {
                             let char_path = char_entry.path();
 
                             if !char_path.is_dir() {
@@ -150,13 +143,13 @@ impl WowScanner {
                                 .unwrap_or("")
                                 .to_string();
 
-                            // Try to determine class from SavedVariables
-                            if let Ok(class) = self.detect_character_class(&char_path) {
+                            if let Ok((class, last_played)) = self.detect_character_info(&char_path) {
                                 characters.push(DiscoveredCharacter {
                                     name: char_name,
                                     realm: realm_name.clone(),
                                     class,
                                     account_id: account_id.clone(),
+                                    last_played,
                                 });
                             }
                         }
@@ -165,18 +158,64 @@ impl WowScanner {
             }
         }
 
+        // Sort by most recently played first
+        characters.sort_by(|a, b| b.last_played.cmp(&a.last_played));
+
         Ok(characters)
     }
 
-    /// Try to detect character class from SavedVariables
-    fn detect_character_class(&self, _char_path: &Path) -> Result<String> {
-        // For now, we'll return Unknown - in a full implementation,
-        // we'd parse character-specific SavedVariables files to determine class
-        // This would require parsing specific addon data files
+    /// Detect class and last-played time from config-cache.wtf.
+    /// Returns an error if the class cannot be determined (skips the character).
+    fn detect_character_info(&self, char_path: &Path) -> Result<(String, u64)> {
+        let config_path = char_path.join("config-cache.wtf");
+        let contents = fs::read_to_string(&config_path)?;
 
-        // A simple heuristic: check if certain class-specific files exist
-        // For now, just return Unknown and let user select
-        Ok("Unknown".to_string())
+        // Get last-modified time as a proxy for last played
+        let last_played = fs::metadata(&config_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        for line in contents.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("SET EJLootClass \"") {
+                let id_str = rest.trim_end_matches('"').trim();
+                if let Ok(id) = id_str.parse::<u8>() {
+                    // ID 0 = character slot exists but no class (deleted/placeholder)
+                    if id == 0 {
+                        anyhow::bail!("character has no class (id=0)");
+                    }
+                    let class = Self::class_id_to_name(id);
+                    if class == "Unknown" {
+                        anyhow::bail!("unrecognized class id: {}", id);
+                    }
+                    return Ok((class.to_string(), last_played));
+                }
+            }
+        }
+
+        anyhow::bail!("EJLootClass not found in config-cache.wtf")
+    }
+
+    fn class_id_to_name(id: u8) -> &'static str {
+        match id {
+            1 => "Warrior",
+            2 => "Paladin",
+            3 => "Hunter",
+            4 => "Rogue",
+            5 => "Priest",
+            6 => "DeathKnight",
+            7 => "Shaman",
+            8 => "Mage",
+            9 => "Warlock",
+            10 => "Monk",
+            11 => "Druid",
+            12 => "DemonHunter",
+            13 => "Evoker",
+            _ => "Unknown",
+        }
     }
 }
 
@@ -186,9 +225,7 @@ mod tests {
 
     #[test]
     fn test_find_default_wow_path() {
-        // This test will pass on systems with WoW installed
         let path = WowScanner::find_default_wow_path();
-        // We can't assert it exists since it depends on the system
         println!("Default WoW path: {:?}", path);
     }
 }

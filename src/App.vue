@@ -13,6 +13,7 @@ interface DiscoveredCharacter {
   realm: string;
   class: string;
   accountId: string;
+  lastPlayed: number;
 }
 
 interface SelectedCharacter {
@@ -61,6 +62,59 @@ const appInitialized = ref(false);
 const showSplash = ref(true);
 const splashFadingOut = ref(false);
 
+interface UpdateInfo {
+  available: boolean;
+  current_version: string;
+  latest_version: string;
+  release_url: string;
+  release_notes: string;
+}
+const updateInfo = ref<UpdateInfo | null>(null);
+const updateDismissed = ref(false);
+const addonInstalled = ref<boolean | null>(null);
+
+const isFirstRun = ref(false);
+const setupStep = ref<'idle' | 'detecting' | 'scanning' | 'content' | 'done' | 'error'>('idle');
+const setupStepsDone = ref<Set<string>>(new Set());
+const setupError = ref('');
+const setupResults = ref({ chars: 0, bosses: 0, dungeons: 0 });
+
+async function runQuickSetup() {
+  setupStep.value = 'detecting';
+  setupStepsDone.value = new Set();
+  setupError.value = '';
+  try {
+    // Step 1: detect WoW path
+    const path = await invoke<string>('find_wow_path');
+    wowPath.value = path;
+    setupStepsDone.value = new Set([...setupStepsDone.value, 'detecting']);
+
+    // Step 2: scan characters
+    setupStep.value = 'scanning';
+    const chars = await invoke<DiscoveredCharacter[]>('scan_characters', { wowPath: path });
+    discoveredCharacters.value = chars;
+    setupResults.value.chars = chars.length;
+    setupStepsDone.value = new Set([...setupStepsDone.value, 'scanning']);
+
+    // Step 3: discover content
+    setupStep.value = 'content';
+    const content = await invoke<{ raid_bosses: string[], dungeons: string[] }>('discover_content');
+    raidBosses.value = content.raid_bosses;
+    dungeons.value = content.dungeons;
+    raidDifficulties.value = ['normal', 'heroic'];
+    setupResults.value.bosses = content.raid_bosses.length;
+    setupResults.value.dungeons = content.dungeons.length;
+    setupStepsDone.value = new Set([...setupStepsDone.value, 'content']);
+
+    await saveSettings(false);
+    setupStep.value = 'done';
+    setTimeout(() => { isFirstRun.value = false; }, 2000);
+  } catch (e) {
+    setupError.value = String(e);
+    setupStep.value = 'error';
+  }
+}
+
 const allClasses = [
   "Warrior", "Paladin", "Hunter", "Rogue", "Priest",
   "DeathKnight", "Shaman", "Mage", "Warlock", "Monk",
@@ -102,13 +156,22 @@ onMounted(async () => {
   }, 2000);
 
   await loadSettings();
-  if (wowPath.value) {
-    await scanForCharacters();
+
+  if (!wowPath.value) {
+    isFirstRun.value = true;
   } else {
-    await findWowPath();
+    await scanForCharacters();
   }
 
   appInitialized.value = true;
+
+  // Check for updates in the background
+  try {
+    const info = await invoke<UpdateInfo>("check_for_updates");
+    if (info.available) updateInfo.value = info;
+  } catch {
+    // Silently ignore — no internet or no release yet
+  }
 });
 
 async function loadSettings() {
@@ -118,7 +181,7 @@ async function loadSettings() {
 
     if (settings) {
       wowPath.value = settings.wowPath || "";
-      discoveredCharacters.value = settings.discoveredCharacters || [];
+      // discoveredCharacters are always rescanned fresh — never loaded from cache
       selectedCharacters.value = settings.characters || [];
       raidDifficulties.value = settings.raidDifficulties || ["heroic"];
       raidBosses.value = settings.raidBosses || [];
@@ -135,7 +198,7 @@ async function saveSettings(showMessage: boolean = true) {
     const store = await load("settings.json", { autoSave: false, defaults: {} });
     const settings: Settings = {
       wowPath: wowPath.value,
-      discoveredCharacters: discoveredCharacters.value,
+      discoveredCharacters: [],
       characters: selectedCharacters.value,
       raidDifficulties: raidDifficulties.value,
       raidBosses: raidBosses.value,
@@ -164,6 +227,11 @@ async function findWowPath() {
   }
 }
 
+async function checkAddon() {
+  if (!wowPath.value) return;
+  addonInstalled.value = await invoke<boolean>("check_addon_installed", { wowPath: wowPath.value });
+}
+
 async function scanForCharacters() {
   if (!wowPath.value) {
     errorMessage.value = "Please set WoW installation path first";
@@ -171,25 +239,17 @@ async function scanForCharacters() {
   }
 
   try {
+    await checkAddon();
     isScanning.value = true;
     errorMessage.value = "";
     const chars = await invoke<DiscoveredCharacter[]>("scan_characters", {
       wowPath: wowPath.value,
     });
 
-    // Merge with existing characters (avoid duplicates)
-    const existingKeys = new Set(
-      discoveredCharacters.value.map(c => `${c.name}-${c.realm}-${c.accountId}`)
-    );
-
-    const newChars = chars.filter(
-      c => !existingKeys.has(`${c.name}-${c.realm}-${c.accountId}`)
-    );
-
-    discoveredCharacters.value = [...discoveredCharacters.value, ...newChars];
-
-    if(appInitialized.value){
-      statusMessage.value = `Found ${chars.length} character(s) (${newChars.length} new)`;
+    // Always replace with fresh scan results — stale cache causes Unknown class issues
+    discoveredCharacters.value = chars;
+    if (appInitialized.value) {
+      statusMessage.value = `Found ${chars.length} character(s)`;
     }
 
     await saveSettings(false);
@@ -318,57 +378,139 @@ async function updateTalents() {
 </script>
 
 <template>
-  <div class="min-h-screen">
+  <div class="min-h-screen" style="background: #07101e;">
     <!-- Splash Screen -->
     <div
       v-if="showSplash"
       class="fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-1000"
       :class="{ 'opacity-0': splashFadingOut, 'opacity-100': !splashFadingOut }"
     >
-      <div class="absolute inset-0">
-        <img
-          src="/hero-banner.png"
-          alt="Talent Heron"
-          class="w-full h-full object-cover object-center"
-        />
-        <!-- Gradient overlay -->
-        <div class="absolute inset-0 bg-gradient-to-b from-[#060719]/40 via-[#222972]/30 to-[#41b2f4]/35"></div>
+      <div class="absolute inset-0 midnight-bg">
+        <div class="stars"></div>
+        <div class="stars2"></div>
+        <div class="moon-glow"></div>
+      </div>
+      <div class="relative z-10 text-center">
+        <h1 class="text-7xl md:text-8xl font-bold tracking-widest midnight-title">
+          TALENT HERON
+        </h1>
+        <div class="mt-3 h-px w-48 mx-auto bg-gradient-to-r from-transparent via-[#7dd3fc] to-transparent opacity-60"></div>
       </div>
     </div>
 
-    <!-- Hero Banner Section -->
-    <div class="relative overflow-hidden">
-      <!-- Parallax Background Image -->
-      <div class="absolute inset-0">
-        <div class="absolute inset-0 opacity-90">
-          <img
-            src="/hero-banner.png"
-            alt="Talent Heron Banner"
-            class="w-full h-full object-cover object-center"
-            style="transform: scale(1.05);"
-          />
-        </div>
-        <!-- Gradient Overlay with custom colors -->
-        <div class="absolute inset-0 bg-gradient-to-b from-[#060719]/30 via-[#222972]/20 to-[#41b2f4]/25"></div>
-      </div>
+    <!-- First Run Setup -->
+    <div
+      v-if="isFirstRun && !showSplash"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+    >
+      <div class="relative w-full max-w-sm mx-4 rounded-2xl border border-[#1e3a5f] bg-[#07101f] shadow-2xl overflow-hidden">
+        <div class="h-px w-full bg-gradient-to-r from-transparent via-[#60a5fa] to-transparent"></div>
+        <div class="p-8 text-center">
+          <h2 class="text-xl font-semibold text-[#93c5fd] tracking-wide mb-1">Welcome to Talent Heron</h2>
+          <p class="text-sm text-[#4a7fa8] mb-8">Set everything up in one click.</p>
 
-      <!-- Hero Content -->
-      <div class="relative z-10 container mx-auto px-4 md:px-8 py-20 md:py-32">
+          <!-- Steps -->
+          <div class="space-y-4 mb-8 text-left">
+            <template v-for="item in [
+              { key: 'detecting', label: 'Detect WoW installation', result: wowPath || null },
+              { key: 'scanning',  label: 'Scan characters', result: setupStepsDone.has('scanning') ? `${setupResults.chars} found` : null },
+              { key: 'content',   label: 'Fetch raid & dungeon content', result: setupStepsDone.has('content') ? `${setupResults.bosses} bosses, ${setupResults.dungeons} dungeons` : null },
+            ]" :key="item.key">
+              <div class="flex items-start gap-3 text-sm">
+                <span class="mt-0.5 w-5 h-5 flex items-center justify-center rounded-full text-xs shrink-0 transition-all"
+                  :class="setupStep === item.key ? 'bg-[#1d4ed8] text-white' : setupStepsDone.has(item.key) ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/20'">
+                  <svg v-if="setupStep === item.key" class="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+                  <span v-else>✓</span>
+                </span>
+                <div>
+                  <div :class="setupStep === item.key ? 'text-white' : setupStepsDone.has(item.key) ? 'text-white/80' : 'text-[#4a7fa8]'">{{ item.label }}</div>
+                  <div v-if="item.result" class="text-xs text-emerald-400 mt-0.5">{{ item.result }}</div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <p v-if="setupStep === 'error'" class="text-xs text-red-400 mb-4 text-left bg-red-900/20 rounded-lg p-3">{{ setupError }}</p>
+
+          <button
+            v-if="setupStep === 'idle' || setupStep === 'error'"
+            @click="runQuickSetup"
+            class="w-full py-3 rounded-xl bg-gradient-to-r from-[#1d4ed8] to-[#3b82f6] hover:from-[#1e40af] hover:to-[#2563eb] text-white font-semibold transition-all"
+            style="box-shadow: 0 4px 20px rgba(59,130,246,0.25)"
+          >
+            {{ setupStep === 'error' ? 'Retry' : 'Get Started' }}
+          </button>
+          <div v-else-if="setupStep === 'done'" class="text-emerald-400 font-medium text-sm">All done ✓</div>
+          <div v-else class="text-[#7aadcc] text-sm">Setting up...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Update Available Modal -->
+    <div
+      v-if="updateInfo && !updateDismissed"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+    >
+      <div class="relative w-full max-w-md mx-4 rounded-2xl border border-[#1e3a5f] bg-[#07101f] shadow-2xl overflow-hidden">
+        <!-- Top accent -->
+        <div class="h-px w-full bg-gradient-to-r from-transparent via-[#60a5fa] to-transparent"></div>
+        <div class="p-6">
+          <div class="flex items-start justify-between mb-4">
+            <div>
+              <h2 class="text-lg font-semibold text-[#93c5fd] tracking-wide">Update Available</h2>
+              <p class="text-sm text-[#4a7fa8] mt-0.5">
+                v{{ updateInfo.current_version }} → v{{ updateInfo.latest_version }}
+              </p>
+            </div>
+            <button
+              @click="updateDismissed = true"
+              class="text-[#4a7fa8] hover:text-white transition-colors text-xl leading-none"
+            >✕</button>
+          </div>
+          <div v-if="updateInfo.release_notes" class="mb-5 text-sm text-[#7aadcc] bg-[#0d1e33] rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap">
+            {{ updateInfo.release_notes }}
+          </div>
+          <div class="flex gap-2">
+            <a
+              :href="updateInfo.release_url"
+              target="_blank"
+              class="flex-1 text-center py-2.5 rounded-lg bg-[#1d4ed8] hover:bg-[#2563eb] text-white text-sm font-medium transition-colors"
+              @click="updateDismissed = true"
+            >Download Update</a>
+            <button
+              @click="updateDismissed = true"
+              class="px-4 py-2.5 rounded-lg border border-[#1e3a5f] hover:border-[#2e5a9a] text-[#7aadcc] hover:text-[#b0cce0] text-sm transition-colors"
+            >Later</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Header -->
+    <div class="relative overflow-hidden">
+      <div class="absolute inset-0 midnight-bg">
+        <div class="stars"></div>
+        <div class="stars2"></div>
+        <div class="moon-glow"></div>
+      </div>
+      <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#07101e]"></div>
+      <div class="relative z-10 container mx-auto px-4 md:px-8 py-10 md:py-14">
         <div class="text-center">
-          <h1 class="text-6xl md:text-7xl font-bold mb-4 text-white drop-shadow-2xl">
-            Talent Heron
+          <h1 class="text-4xl md:text-5xl font-bold tracking-widest midnight-title mb-2">
+            TALENT HERON
           </h1>
-          <p class="text-white/90 text-xl md:text-2xl drop-shadow-lg max-w-2xl mx-auto">
-            Auto-discover characters and update WoW talents from Archon.gg
+          <div class="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-[#7dd3fc] to-transparent opacity-40 mb-3"></div>
+          <p class="text-[#7aadcc] text-sm tracking-widest uppercase">
+            Auto-update WoW talents from Archon.gg
           </p>
         </div>
       </div>
     </div>
 
     <!-- Main Content -->
-    <div class="container mx-auto max-w-6xl px-4 md:px-8 py-8">
-      <div class="bg-white/20 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/30">
-        <div class="p-6 md:p-8">
+    <div class="container mx-auto max-w-4xl px-4 md:px-8 pb-10">
+      <div class="bg-[#0e1d33]/95 rounded-2xl border border-[#1e3a5f] shadow-2xl">
+        <div class="p-5 md:p-7">
           <StatusMessages :status-message="statusMessage" :error-message="errorMessage" />
 
           <!-- Tab Navigation -->
@@ -397,6 +539,7 @@ async function updateTalents() {
             v-if="activeTab === 'game'"
             :wow-path="wowPath"
             :is-scanning="isScanning"
+            :addon-installed="addonInstalled"
             @update:wow-path="wowPath = $event"
             @find:path="findWowPath"
             @scan:characters="scanForCharacters"
@@ -423,4 +566,68 @@ async function updateTalents() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.midnight-bg {
+  background: radial-gradient(ellipse at 50% 0%, #0f1f4a 0%, #060d1f 40%, #07101e 100%);
+}
+
+.moon-glow {
+  position: absolute;
+  top: -80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(147, 197, 253, 0.08) 0%, rgba(96, 165, 250, 0.04) 40%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.midnight-title {
+  background: linear-gradient(180deg, #e2eeff 0%, #93c5fd 50%, #60a5fa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 24px rgba(96, 165, 250, 0.4));
+}
+
+.stars {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 10% 15%, rgba(255,255,255,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 25% 40%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 40% 8%, rgba(255,255,255,0.8) 0%, transparent 100%),
+    radial-gradient(1px 1px at 55% 30%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 70% 12%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 82% 22%, rgba(255,255,255,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 92% 5%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 15% 60%, rgba(255,255,255,0.3) 0%, transparent 100%),
+    radial-gradient(1px 1px at 35% 75%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 60% 55%, rgba(255,255,255,0.3) 0%, transparent 100%),
+    radial-gradient(1px 1px at 78% 68%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 90% 80%, rgba(255,255,255,0.3) 0%, transparent 100%);
+  animation: twinkle 6s ease-in-out infinite alternate;
+}
+
+.stars2 {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 18% 25%, rgba(147,197,253,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 45% 18%, rgba(147,197,253,0.4) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 63% 42%, rgba(147,197,253,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 85% 35%, rgba(147,197,253,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 5% 50%, rgba(147,197,253,0.3) 0%, transparent 100%),
+    radial-gradient(1px 1px at 30% 88%, rgba(147,197,253,0.3) 0%, transparent 100%),
+    radial-gradient(1px 1px at 72% 82%, rgba(147,197,253,0.4) 0%, transparent 100%);
+  animation: twinkle 8s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes twinkle {
+  0%   { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+</style>
 

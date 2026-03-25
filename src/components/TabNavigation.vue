@@ -6,66 +6,29 @@ defineProps<{
 defineEmits<{
   (e: 'update:activeTab', value: string): void;
 }>();
+
+const tabs = [
+  { key: 'characters', label: 'Characters' },
+  { key: 'game', label: 'Game Settings' },
+  { key: 'content', label: 'Content' },
+];
 </script>
 
 <template>
-  <div role="tablist" class="flex gap-2 p-1 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 mt-6 mb-6">
+  <div class="flex gap-0 mt-6 mb-6 border-b border-[#1e3a5f]">
     <button
+      v-for="tab in tabs"
+      :key="tab.key"
       role="tab"
-      @click="$emit('update:activeTab', 'characters')"
-      :class="[
-        'flex-1',
-        'font-semibold',
-        'py-3',
-        'px-4',
-        'rounded-xl',
-        'transition-all',
-        'duration-300',
-        {
-          'bg-white/30 backdrop-blur-lg shadow-lg text-white font-bold': activeTab === 'characters',
-          'text-white/90 hover:text-white hover:bg-white/10': activeTab !== 'characters'
-        }
-      ]"
+      @click="$emit('update:activeTab', tab.key)"
+      class="relative px-6 py-3 text-sm font-medium transition-colors duration-200 select-none"
+      :class="activeTab === tab.key ? 'text-[#93c5fd]' : 'text-[#7aadcc] hover:text-[#7aadcc]'"
     >
-      Active Characters
-    </button>
-    <button
-      role="tab"
-      @click="$emit('update:activeTab', 'game')"
-      :class="[
-        'flex-1',
-        'font-semibold',
-        'py-3',
-        'px-4',
-        'rounded-xl',
-        'transition-all',
-        'duration-300',
-        {
-          'bg-white/30 backdrop-blur-lg shadow-lg text-white font-bold': activeTab === 'game',
-          'text-white/80 hover:text-white hover:bg-white/10': activeTab !== 'game'
-        }
-      ]"
-    >
-      Game Settings
-    </button>
-    <button
-      role="tab"
-      @click="$emit('update:activeTab', 'content')"
-      :class="[
-        'flex-1',
-        'font-semibold',
-        'py-3',
-        'px-4',
-        'rounded-xl',
-        'transition-all',
-        'duration-300',
-        {
-          'bg-white/30 backdrop-blur-lg shadow-lg text-white font-bold': activeTab === 'content',
-          'text-white/80 hover:text-white hover:bg-white/10': activeTab !== 'content'
-        }
-      ]"
-    >
-      Content Settings
+      {{ tab.label }}
+      <span
+        v-if="activeTab === tab.key"
+        class="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#60a5fa] to-transparent"
+      />
     </button>
   </div>
 </template>
