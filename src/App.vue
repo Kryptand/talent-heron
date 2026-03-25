@@ -486,10 +486,10 @@ async function updateTalents() {
       v-if="updateInfo && updateInfo.available && !updateDismissed"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
     >
-      <div class="relative w-full max-w-md mx-4 rounded-2xl border border-[#1e3a5f] bg-[#07101f] shadow-2xl overflow-hidden">
+      <div class="relative w-full max-w-md mx-4 rounded-2xl border border-[#1e3a5f] bg-[#07101f] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <!-- Top accent -->
-        <div class="h-px w-full bg-gradient-to-r from-transparent via-[#60a5fa] to-transparent"></div>
-        <div class="p-6">
+        <div class="h-px w-full bg-gradient-to-r from-transparent via-[#60a5fa] to-transparent shrink-0"></div>
+        <div class="p-6 overflow-y-auto">
           <div class="flex items-start justify-between mb-4">
             <div>
               <h2 class="text-lg font-semibold text-[#93c5fd] tracking-wide">Update Available</h2>
@@ -502,7 +502,7 @@ async function updateTalents() {
               class="text-[#4a7fa8] hover:text-white transition-colors text-xl leading-none"
             >✕</button>
           </div>
-          <div v-if="updateInfo.release_notes" class="mb-5 text-sm text-[#7aadcc] bg-[#0d1e33] rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap">
+          <div v-if="updateInfo.release_notes" class="mb-4 text-sm text-[#7aadcc] bg-[#0d1e33] rounded-lg p-3 max-h-24 overflow-y-auto whitespace-pre-wrap">
             {{ updateInfo.release_notes }}
           </div>
           <!-- Download progress -->
