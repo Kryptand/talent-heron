@@ -168,9 +168,9 @@ onMounted(async () => {
   // Check for updates in the background
   try {
     const info = await invoke<UpdateInfo>("check_for_updates");
-    if (info.available) updateInfo.value = info;
-  } catch {
-    // Silently ignore — no internet or no release yet
+    updateInfo.value = info; // always set so we can show current version
+  } catch (e) {
+    console.warn("Update check failed:", e);
   }
 });
 
@@ -448,8 +448,8 @@ async function updateTalents() {
 
     <!-- Update Available Modal -->
     <div
-      v-if="updateInfo && !updateDismissed"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      v-if="updateInfo && updateInfo.available && !updateDismissed"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
     >
       <div class="relative w-full max-w-md mx-4 rounded-2xl border border-[#1e3a5f] bg-[#07101f] shadow-2xl overflow-hidden">
         <!-- Top accent -->
@@ -500,9 +500,19 @@ async function updateTalents() {
             TALENT HERON
           </h1>
           <div class="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-[#7dd3fc] to-transparent opacity-40 mb-3"></div>
-          <p class="text-[#7aadcc] text-sm tracking-widest uppercase">
-            Auto-update WoW talents from Archon.gg
-          </p>
+          <div class="flex items-center justify-center gap-3">
+            <p class="text-[#7aadcc] text-sm tracking-widest uppercase">
+              Auto-update WoW talents from Archon.gg
+            </p>
+            <span v-if="updateInfo" class="text-xs px-2 py-0.5 rounded-full border cursor-pointer transition-all"
+              :class="updateInfo.available
+                ? 'bg-[#1d4ed8]/20 border-[#3b82f6]/40 text-[#93c5fd] hover:bg-[#1d4ed8]/30'
+                : 'bg-[#0e1d33] border-[#1e3a5f] text-[#5580a0]'"
+              @click="updateDismissed = false"
+            >
+              {{ updateInfo.available ? `v${updateInfo.latest_version} available` : `v${updateInfo.current_version}` }}
+            </span>
+          </div>
         </div>
       </div>
     </div>
