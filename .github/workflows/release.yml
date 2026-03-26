@@ -13,18 +13,12 @@ jobs:
         include:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            artifact_name: talent-heron
-            release_name: talent-heron-linux-x86_64
 
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: talent-heron.exe
-            release_name: talent-heron-windows-x86_64.exe
 
           - platform: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: talent-heron
-            release_name: talent-heron-macos-aarch64
 
     runs-on: ${{ matrix.platform }}
 
@@ -65,22 +59,31 @@ jobs:
       - name: Build Tauri app
         run: npm run tauri build -- --target ${{ matrix.target }}
 
-      - name: Locate and rename binary (Linux/macOS)
-        if: matrix.platform != 'windows-latest'
-        run: |
-          BIN=$(find src-tauri/target/${{ matrix.target }}/release -maxdepth 1 -name "talent-heron" -type f | head -1)
-          cp "$BIN" "${{ matrix.release_name }}"
-
-      - name: Locate and rename binary (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          $bin = Get-ChildItem -Path "src-tauri/target/${{ matrix.target }}/release" -Filter "talent-heron.exe" -File | Select-Object -First 1
-          Copy-Item $bin.FullName "${{ matrix.release_name }}"
-
-      - name: Upload to GitHub Release
+      - name: Upload release assets (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.release_name }}
+          files: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release assets (macOS)
+        if: matrix.platform == 'macos-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release assets (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
